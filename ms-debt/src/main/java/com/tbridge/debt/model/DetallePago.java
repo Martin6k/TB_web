@@ -23,6 +23,8 @@ import java.util.List;
  * @param pasarela webpay, mercadopago o khipu
  * @param cuotas   el lugar de cada cuota pagada, de menor a mayor
  * @param de       cuantas cuotas tenia la deuda en ese momento
+ * @param fuera    cuantas cuotas aparte, fuera del convenio, cubrio el pago: los meses que el acreedor informo
+ *                 despues de que el deudor acepto su convenio. Null si ninguna
  */
 @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
 public record DetallePago(
@@ -31,6 +33,7 @@ public record DetallePago(
         BigDecimal valorUf,
         String pasarela,
         List<Integer> cuotas,
-        Integer de
+        Integer de,
+        Integer fuera
 ) {
 }

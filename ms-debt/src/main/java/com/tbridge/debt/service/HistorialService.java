@@ -79,6 +79,7 @@ public class HistorialService {
                 referencia[1],
                 detalle == null || detalle.cuotas() == null ? List.of() : detalle.cuotas(),
                 detalle == null ? null : detalle.de(),
+                detalle == null ? null : detalle.fuera(),
                 evento.getOccurredAt());
     }
 

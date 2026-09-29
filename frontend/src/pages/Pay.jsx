@@ -70,8 +70,10 @@ export default function Pay() {
   const pendientes = vigentes.filter((c) => c.estado === "pending");
   const pagadas = vigentes.filter((c) => c.estado === "paid");
   //  Las cuotas se numeran corrido entre planes (la 1 pudo quedar anulada al
-  //  repactar): al deudor se le muestra su lugar dentro del convenio.
-  const lugar = (c) => `Cuota ${vigentes.indexOf(c) + 1} de ${vigentes.length}`;
+  //  repactar): al deudor se le muestra su lugar dentro del convenio. Un mes
+  //  que el acreedor informo despues va aparte y no corre la numeracion.
+  const delPlan = vigentes.filter((c) => c.enConvenio);
+  const lugar = (c) => (c.enConvenio ? `Cuota ${delPlan.indexOf(c) + 1} de ${delPlan.length}` : "Fuera del convenio");
   const enConvenio = deuda.conConvenio && pendientes.length > 0;
   const k = Math.min(cuantas, pendientes.length);
   const elegidas = enConvenio ? pendientes.slice(0, k) : pendientes;

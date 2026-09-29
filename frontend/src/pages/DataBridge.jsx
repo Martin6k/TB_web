@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { resumenDeCartera } from "../api/analitica";
 import { enviarCodigo as pedirCodigo, listarDeudas, listarEnRiesgo } from "../api/deudas";
-import { dinero, ESTADO_DEUDA, fecha, rutLegible } from "../utils/formato";
+import { dinero, ESTADO_DEUDA, fecha, rutLegible, totalDeLaDeuda } from "../utils/formato";
 import { descargarCsv, montoParaExcel } from "../utils/exportar";
 import BarraEstado, { etapaDe } from "../components/BarraEstado";
 import { EstadoCartera, RecuperadoPorDia } from "../components/Graficos";
@@ -53,10 +53,11 @@ export default function DataBridge() {
 
   function exportar() {
     descargarCsv("cartera.csv",
-      ["Deudor", "RUT", "Acreedor", "Contrato", "Concepto", "Moneda", "Monto original", "Saldo", "Estado",
+      ["Deudor", "RUT", "Acreedor", "Contrato", "Concepto", "Moneda", "Total", "Pagado", "Saldo", "Estado",
         "Cuotas pagadas", "Cuotas del convenio", "Actualizada"],
       visibles.map((d) => [d.deudor, rutLegible(d.deudorRut), d.acreedor, d.externalId, d.concepto, d.moneda,
-        montoParaExcel(d.montoOriginal, d.moneda), montoParaExcel(d.saldo, d.moneda), etapaDe(d).texto,
+        montoParaExcel(totalDeLaDeuda(d), d.moneda), montoParaExcel(d.pagado, d.moneda),
+        montoParaExcel(d.saldo, d.moneda), etapaDe(d).texto,
         d.cuotasPagadas, d.cuotasTotales, fecha(d.actualizada)]));
   }
 
@@ -153,7 +154,7 @@ export default function DataBridge() {
                       <td>{d.acreedor}<span className="sub">{d.concepto}, contrato {d.externalId}</span></td>
                       <td className="num">
                         {dinero(d.saldo, d.moneda)}
-                        <span className="sub">de {dinero(d.montoOriginal, d.moneda)}</span>
+                        <span className="sub">de {dinero(totalDeLaDeuda(d), d.moneda)}</span>
                       </td>
                       <td>
                         <BarraEstado deuda={d} compacta />

@@ -69,12 +69,16 @@ import java.util.TreeMap;
  * a cobranza cuando tiene al menos {@code app.cartera.min-meses-impagos}
  * meses impagos (dos, por omision). Con menos todavia no es mora, y se rechaza
  * sola con el codigo {@code bajo_umbral_mora}.
+ *
+ * <p><b>Lo que se pago por DataBridge manda.</b> Una deuda en convenio que
+ * vuelve en la cartera del mes siguiente conserva su convenio, y una pagada
+ * vuelve a cobranza solo con cargos posteriores a los que se pagaron.
  */
 @Service
 public class CarteraIntakeService {
 
     private static final Set<String> MOTIVOS_DE_RETIRO = Set.of(
-            "pago_directo", "acuerdo_directo", "error", "disputa_resuelta", "otro");
+            "pago_directo", "acuerdo_directo", "error", "disputa_resuelta", "fuera_de_mandato", "otro");
 
     private final OrganizationRepository organizations;
     private final MandateRepository mandates;
@@ -274,7 +278,9 @@ public class CarteraIntakeService {
         String accion = deuda.has("accion") ? texto(deuda.get("accion")) : "registrar";
         Debt existente = debts.findByCreditorAndExternalId(acreedor, idDeuda).orElse(null);
 
-        if (existente != null && existente.getStatus() == Debt.Status.paid) {
+        //  Una deuda pagada solo vuelve registrandola de nuevo, con cargos nuevos:
+        //  eso se revisa al leerlos. Retirarla no cambia nada.
+        if (existente != null && existente.getStatus() == Debt.Status.paid && !"registrar".equals(accion)) {
             return rechazo(idDeuda, error("id_externo", "deuda_saldada",
                     "Esa deuda ya se pago y no se puede modificar"));
         }
@@ -410,14 +416,25 @@ public class CarteraIntakeService {
                     mora + " dias de mora: pasados los " + maximo + " el caso vuelve al acreedor"));
         }
 
-        //  El alcance: deudores morosos. Se exige solo al ENTRAR. Una deuda que
-        //  ya esta en gestion puede volver con menos cargos (el arrendatario
-        //  pago una parte en la oficina), y rechazarla dejaria a DataBridge
-        //  cobrando un monto que ya no existe. Y solo si se leyeron todos los
-        //  cargos: si alguno venia malo, contar los buenos no dice nada.
         boolean todosLeidos = nodoCargos != null && nodoCargos.isArray() && cargos.size() == nodoCargos.size();
+
+        //  Una deuda pagada vuelve a cobranza solo con cargos posteriores a los
+        //  que se pagaron: el arrendatario se volvio a atrasar. Con alguno de los
+        //  ya pagados seria cobrarle dos veces lo mismo.
+        boolean pagada = existente != null && existente.getStatus() == Debt.Status.paid;
+        if (pagada && todosLeidos && !soloCargosNuevos(existente, cargos)) {
+            errores.add(error("id_externo", "deuda_saldada",
+                    "Esa deuda ya se pago: vuelve a cobranza solo con cargos posteriores a los que se pagaron"));
+        }
+
+        //  El alcance: deudores morosos. Se exige solo al ENTRAR, y una deuda
+        //  pagada que vuelve entra de nuevo. Una que ya esta en gestion puede
+        //  volver con menos cargos (el arrendatario pago una parte en la
+        //  oficina), y rechazarla dejaria a DataBridge cobrando un monto que ya
+        //  no existe. Y solo si se leyeron todos los cargos: si alguno venia
+        //  malo, contar los buenos no dice nada.
         long meses = mesesImpagos(cargos);
-        if (existente == null && todosLeidos && meses < minMesesImpagos) {
+        if ((existente == null || pagada) && todosLeidos && meses < minMesesImpagos) {
             errores.add(error("cargos", "bajo_umbral_mora", "Tiene " + meses
                     + (meses == 1 ? " mes impago" : " meses impagos")
                     + ": DataBridge recibe deudas desde " + minMesesImpagos + " meses impagos"));
@@ -435,7 +452,7 @@ public class CarteraIntakeService {
         boolean nueva = existente == null;
         Debt registro = nueva ? new Debt() : existente;
         boolean sinCambios = !nueva && mismosCargos(registro, cargos)
-                && registro.getStatus() == Debt.Status.open
+                && (registro.getStatus() == Debt.Status.open || registro.getStatus() == Debt.Status.repacted)
                 && registro.getDebtor().getId().equals(deudor.getId());
 
         registro.setCreditor(acreedor);
@@ -455,8 +472,9 @@ public class CarteraIntakeService {
         if (nueva) {
             registro.setFirstBatch(batch);
         }
-        if (registro.getStatus() == Debt.Status.withdrawn) {
-            //  El acreedor la devuelve a gestion: vuelve a estar abierta.
+        if (registro.getStatus() == Debt.Status.withdrawn || registro.getStatus() == Debt.Status.paid) {
+            //  El acreedor la devuelve a gestion, o el deudor se volvio a
+            //  atrasar: vuelve a estar abierta.
             registro.setWithdrawnReason(null);
             registro.setStatus(Debt.Status.open);
         }
@@ -523,8 +541,10 @@ public class CarteraIntakeService {
      * oficina, reenvia la deuda con el saldo menor, y conservar los cargos
      * viejos dejaria a DataBridge cobrando un monto que ya no existe.
      *
-     * <p>Las cuotas pendientes tambien se rehacen. Las pagadas no se tocan:
-     * eso ya ocurrio.
+     * <p>Las cuotas pendientes tambien se rehacen, salvo las de un convenio: el
+     * deudor lo acepto y lo esta pagando, y que el acreedor vuelva a mandar la
+     * deuda en su cartera del mes no es una decision sobre eso (ver
+     * {@link #conservarConvenio}). Las pagadas no se tocan: eso ya ocurrio.
      */
     private void reemplazarCargos(Debt deuda, List<CargoLeido> cargos, BigDecimal total) {
         charges.deleteByDebt(deuda);
@@ -538,18 +558,76 @@ public class CarteraIntakeService {
             charges.save(fila);
         }
 
-        for (Installment pendiente : installments.findByDebtAndStatus(deuda, Installment.Status.pending)) {
+        LocalDate ultimoCargo = cargos.stream().map(CargoLeido::vence).max(LocalDate::compareTo).orElseThrow();
+        List<Installment> pendientes = installments.findByDebtAndStatus(deuda, Installment.Status.pending);
+        if (deuda.getStatus() == Debt.Status.repacted && pendientes.stream().anyMatch(Installment::enConvenio)) {
+            conservarConvenio(deuda, pendientes, ultimoCargo, total);
+            return;
+        }
+        for (Installment pendiente : pendientes) {
             pendiente.setStatus(Installment.Status.void_);
             installments.save(pendiente);
         }
+        nuevaCuota(deuda, ultimoCargo, total);
+    }
+
+    /**
+     * El convenio sigue en pie. Lo que el acreedor informa de mas —un mes
+     * nuevo— queda como una cuota aparte, fuera del convenio; lo que informa
+     * de menos —le pagaron una parte en la oficina— se descuenta de las
+     * ultimas cuotas, que es donde el plan termina antes. Una cuota aparte de
+     * una cartera anterior se rehace: el acreedor manda lo que se debe hoy.
+     */
+    private void conservarConvenio(Debt deuda, List<Installment> pendientes, LocalDate ultimoCargo,
+                                   BigDecimal total) {
+        List<Installment> delConvenio = new ArrayList<>();
+        for (Installment cuota : pendientes) {
+            if (cuota.enConvenio()) {
+                delConvenio.add(cuota);
+            } else {
+                cuota.setStatus(Installment.Status.void_);
+                installments.save(cuota);
+            }
+        }
+        delConvenio.sort(DebtService.EN_ORDEN);
+        BigDecimal diferencia = total.subtract(delConvenio.stream()
+                .map(Installment::getAmount).reduce(BigDecimal.ZERO, BigDecimal::add));
+        if (diferencia.signum() > 0) {
+            nuevaCuota(deuda, ultimoCargo, diferencia);
+            return;
+        }
+        BigDecimal porDescontar = diferencia.negate();
+        for (Installment cuota : delConvenio.reversed()) {
+            if (porDescontar.signum() == 0) {
+                break;
+            }
+            if (cuota.getAmount().compareTo(porDescontar) <= 0) {
+                porDescontar = porDescontar.subtract(cuota.getAmount());
+                cuota.setStatus(Installment.Status.void_);
+            } else {
+                cuota.setAmount(cuota.getAmount().subtract(porDescontar));
+                porDescontar = BigDecimal.ZERO;
+            }
+            installments.save(cuota);
+        }
+    }
+
+    private void nuevaCuota(Debt deuda, LocalDate vence, BigDecimal monto) {
         short numero = (short) (installments.findByDebtOrderByNumberAsc(deuda).stream()
                 .mapToInt(Installment::getNumber).max().orElse(0) + 1);
         Installment cuota = new Installment();
         cuota.setDebt(deuda);
         cuota.setNumber(numero);
-        cuota.setDueDate(cargos.getLast().vence());
-        cuota.setAmount(total);
+        cuota.setDueDate(vence);
+        cuota.setAmount(monto);
         installments.save(cuota);
+    }
+
+    /** Si todos los cargos vencen despues del ultimo que tenia la deuda cuando se pago. */
+    private boolean soloCargosNuevos(Debt pagada, List<CargoLeido> cargos) {
+        LocalDate ultimoPagado = charges.findByDebtOrderByDueDateAsc(pagada).stream()
+                .map(DebtCharge::getDueDate).max(LocalDate::compareTo).orElse(null);
+        return ultimoPagado == null || cargos.stream().allMatch(c -> c.vence().isAfter(ultimoPagado));
     }
 
     private boolean mismosCargos(Debt deuda, List<CargoLeido> nuevos) {

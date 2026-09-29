@@ -56,7 +56,8 @@ public record CarteraV1(
             String idExterno,
             @Schema(allowableValues = {"registrar", "retirar"}, nullable = true) String accion,
             @Schema(description = "Solo al retirar", nullable = true,
-                    allowableValues = {"pago_directo", "acuerdo_directo", "error", "disputa_resuelta", "otro"})
+                    allowableValues = {"pago_directo", "acuerdo_directo", "error", "disputa_resuelta",
+                            "fuera_de_mandato", "otro"})
             String motivoRetiro,
             Deudor deudor,
             @Schema(allowableValues = {"CLP", "UF"}) String moneda,

@@ -254,6 +254,49 @@ class DebtServiceTest {
         assertEquals(pagadoEn, aplicado.getOccurredAt());
     }
 
+    /** Un mes que el acreedor informo despues del convenio: una cuota aparte, la que vence primero. */
+    private void conUnMesAparte() {
+        Installment aparte = new Installment();
+        aparte.setId(16L);
+        aparte.setDebt(deuda);
+        aparte.setNumber((short) 5);
+        aparte.setDueDate(LocalDate.of(2026, 10, 1));
+        aparte.setAmount(new BigDecimal("410000"));
+        cuotas.add(aparte);
+    }
+
+    @Test
+    void el_mes_aparte_no_cuenta_en_el_avance_del_convenio() {
+        enConvenioDeTres();
+        cuotas.get(1).setStatus(Installment.Status.paid);
+        conUnMesAparte();
+        when(debts.findByDebtorOrderByUpdatedAtDesc(valentina)).thenReturn(List.of(deuda));
+
+        DebtSummaryResponse resumen = servicio.listFor(deudor("18905214-6")).getFirst();
+
+        assertEquals(1, resumen.cuotasPagadas());
+        assertEquals(3, resumen.cuotasTotales());
+        assertEquals(new BigDecimal("690000"), resumen.saldo());
+        //  Lo pagado es lo que se pago aca, no el monto original menos el saldo.
+        assertEquals(new BigDecimal("140000"), resumen.pagado());
+    }
+
+    @Test
+    void un_pago_que_cubre_el_mes_aparte_lo_anota_fuera_del_convenio() throws Exception {
+        enConvenioDeTres();
+        conUnMesAparte();
+
+        //  El mes aparte vence primero: se paga el y la primera del convenio.
+        servicio.onPagoConfirmado(new PagoConfirmado(PagoConfirmado.TIPO, 44L, 3L, null, "18905214-6",
+                "76418902-7", new BigDecimal("550000"), "CLP", 550000L, null, "webpay", "wp-aparte", Instant.now()));
+
+        JsonNode detalle = json.readTree(historia.stream()
+                .filter(e -> e.getType() == DebtEvent.Type.payment_applied).findFirst().orElseThrow().getDetail());
+        assertEquals("[1]", detalle.get("cuotas").toString());
+        assertEquals(3, detalle.get("de").asInt());
+        assertEquals(1, detalle.get("fuera").asInt());
+    }
+
     @Test
     void dos_cuotas_pagadas_juntas_dejan_la_tercera_pendiente() {
         enConvenioDeTres();

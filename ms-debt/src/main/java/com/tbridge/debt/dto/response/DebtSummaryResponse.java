@@ -36,8 +36,8 @@ public record DebtSummaryResponse(
         Instant actualizada,
         @Schema(description = "Cuotas ya pagadas. Con cuotasTotales, el avance del convenio", example = "1")
         int cuotasPagadas,
-        @Schema(description = "Cuotas vigentes: las pagadas mas las pendientes. Las anuladas no cuentan",
-                example = "6")
+        @Schema(description = "Cuotas vigentes: las pagadas mas las pendientes. Las anuladas no cuentan, y en un "
+                + "convenio tampoco una cuota aparte", example = "6")
         int cuotasTotales,
         @Schema(description = "Si se paga (o se pago) con un convenio de cuotas", example = "true")
         boolean conConvenio,
@@ -48,16 +48,28 @@ public record DebtSummaryResponse(
 
     private static final ZoneId CHILE = ZoneId.of("America/Santiago");
 
+    private static BigDecimal suma(List<Installment> cuotas, Installment.Status estado) {
+        return cuotas.stream().filter(c -> c.getStatus() == estado).map(Installment::getAmount)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+    }
+
     /** Con las cuotas de la deuda: de ellas salen el saldo y el avance. */
     public static DebtSummaryResponse from(Debt deuda, List<Installment> cuotas) {
-        BigDecimal saldo = cuotas.stream()
-                .filter(c -> c.getStatus() == Installment.Status.pending)
-                .map(Installment::getAmount)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
-        int pagadas = (int) cuotas.stream().filter(c -> c.getStatus() == Installment.Status.paid).count();
-        int vigentes = (int) cuotas.stream().filter(c -> c.getStatus() != Installment.Status.void_).count();
-        boolean conConvenio = cuotas.stream()
-                .anyMatch(c -> c.getStatus() != Installment.Status.void_ && c.enConvenio());
+        BigDecimal saldo = suma(cuotas, Installment.Status.pending);
+        //  Lo pagado es lo que se pago por DataBridge. No sale de restar el saldo
+        //  al monto original: cuando el acreedor actualiza la deuda, su monto ya
+        //  viene descontado de lo que se pago aca.
+        BigDecimal pagado = suma(cuotas, Installment.Status.paid);
+        boolean conConvenio = (deuda.getStatus() == Debt.Status.repacted || deuda.getStatus() == Debt.Status.paid)
+                && cuotas.stream().anyMatch(c -> c.getStatus() != Installment.Status.void_ && c.enConvenio());
+        //  En convenio el avance se cuenta sobre las cuotas del plan: una cuota
+        //  aparte (un mes que el acreedor informo despues) no es parte de el.
+        List<Installment> delAvance = cuotas.stream()
+                .filter(c -> c.getStatus() != Installment.Status.void_)
+                .filter(c -> !conConvenio || c.enConvenio())
+                .toList();
+        int pagadas = (int) delAvance.stream().filter(c -> c.getStatus() == Installment.Status.paid).count();
+        int vigentes = delAvance.size();
         LocalDate hoy = LocalDate.now(CHILE);
         int vencidas = (int) cuotas.stream()
                 .filter(c -> c.getStatus() == Installment.Status.pending && c.getDueDate().isBefore(hoy)).count();
@@ -72,7 +84,7 @@ public record DebtSummaryResponse(
                 deuda.getCurrency(),
                 deuda.getOriginalAmount(),
                 saldo,
-                deuda.getOriginalAmount().subtract(saldo),
+                pagado,
                 deuda.getStatus(),
                 deuda.getUpdatedAt(),
                 pagadas,

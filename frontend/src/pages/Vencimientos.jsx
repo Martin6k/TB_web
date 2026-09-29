@@ -107,7 +107,8 @@ function FilaCuota({ cuota: c, i }) {
         <span>{dia.toLocaleDateString("es-CL", { month: "short" }).replace(".", "")}</span>
       </div>
       <div className="fila-que">
-        <b>{c.enConvenio ? `Cuota ${c.lugar} de ${c.deCuotas}` : "Pago de la deuda completa"}</b>
+        <b>{c.enConvenio ? `Cuota ${c.lugar} de ${c.deCuotas}`
+          : c.fueraDelConvenio ? "Fuera del convenio" : "Pago de la deuda completa"}</b>
         <span>{c.concepto} con {c.acreedor}. {cuandoVence(c.dias)}.</span>
       </div>
       <div className="fila-monto">

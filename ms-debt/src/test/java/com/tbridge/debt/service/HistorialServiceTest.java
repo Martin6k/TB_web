@@ -129,16 +129,23 @@ class HistorialServiceTest {
 
     @Test
     void el_comprobante_dice_que_se_pago_con_palabras() {
-        PagoResponse base = new PagoResponse(1L, 3L, "X", "A", "D", "1-9", "C", Debt.Currency.CLP, BigDecimal.ONE,
-                1L, null, "webpay", "r", List.of(4, 5), 6, Instant.now());
-        assertEquals("Cuotas 4 y 5 de 6", ComprobanteService.queSePago(base));
-        assertEquals("Cuota 3 de 12", ComprobanteService.queSePago(new PagoResponse(1L, 3L, "X", "A", "D", "1-9",
-                "C", Debt.Currency.CLP, BigDecimal.ONE, 1L, null, "webpay", "r", List.of(3), 12, Instant.now())));
-        assertEquals("Cuotas 1, 2 y 3 de 3", ComprobanteService.queSePago(new PagoResponse(1L, 3L, "X", "A", "D",
-                "1-9", "C", Debt.Currency.CLP, BigDecimal.ONE, 1L, null, "webpay", "r", List.of(1, 2, 3), 3,
-                Instant.now())));
-        assertEquals("El total de la deuda", ComprobanteService.queSePago(new PagoResponse(1L, 3L, "X", "A", "D",
-                "1-9", "C", Debt.Currency.CLP, BigDecimal.ONE, 1L, null, "webpay", "r", List.of(1), 1, Instant.now())));
+        assertEquals("Cuotas 4 y 5 de 6", ComprobanteService.queSePago(pago(List.of(4, 5), 6, null)));
+        assertEquals("Cuota 3 de 12", ComprobanteService.queSePago(pago(List.of(3), 12, null)));
+        assertEquals("Cuotas 1, 2 y 3 de 3", ComprobanteService.queSePago(pago(List.of(1, 2, 3), 3, null)));
+        assertEquals("El total de la deuda", ComprobanteService.queSePago(pago(List.of(1), 1, null)));
+    }
+
+    @Test
+    void un_mes_informado_despues_del_convenio_se_nombra_aparte() {
+        assertEquals("Fuera del convenio", ComprobanteService.queSePago(pago(List.of(), 6, 1)));
+        assertEquals("Fuera del convenio y cuota 3 de 6", ComprobanteService.queSePago(pago(List.of(3), 6, 1)));
+        assertEquals("Fuera del convenio y cuotas 3 y 4 de 6",
+                ComprobanteService.queSePago(pago(List.of(3, 4), 6, 1)));
+    }
+
+    private static PagoResponse pago(List<Integer> cuotas, Integer de, Integer fuera) {
+        return new PagoResponse(1L, 3L, "X", "A", "D", "1-9", "C", Debt.Currency.CLP, BigDecimal.ONE,
+                1L, null, "webpay", "r", cuotas, de, fuera, Instant.now());
     }
 
     @Test

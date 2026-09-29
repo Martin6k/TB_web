@@ -19,8 +19,8 @@ import com.tbridge.debt.repository.DebtorRepository;
 import com.tbridge.debt.repository.InstallmentRepository;
 import com.tbridge.debt.repository.OrganizationRepository;
 import com.tbridge.debt.repository.RepactationRepository;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.CommandLineRunner;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -55,11 +55,14 @@ import java.util.List;
  * </ul>
  *
  * <p>Al arrancar se agrega el deudor que falte, sin tocar los que ya estan: una
- * base con datos propios no pierde nada. Con {@code app.demo.datos=false} no
- * se siembra nada.
+ * base con datos propios no pierde nada.
+ *
+ * <p>Las dos organizaciones de la cadena, Patrimonio y APOFYX, se registran
+ * siempre: sin ellas nadie podria entregar cartera, ni se le podria emitir una
+ * clave a la agencia. Con {@code app.demo.datos=false} queda fuera solo la
+ * historia.
  */
 @Component
-@ConditionalOnProperty(name = "app.demo.datos", havingValue = "true", matchIfMissing = true)
 public class DataSeeder implements CommandLineRunner {
 
     private static final ZoneId CHILE = ZoneId.of("America/Santiago");
@@ -73,6 +76,7 @@ public class DataSeeder implements CommandLineRunner {
     private final RepactationRepository repactations;
     private final DebtEventRepository events;
     private final ObjectMapper json;
+    private final boolean historia;
 
     private Organization patrimonio;
     private Organization apofyx;
@@ -88,7 +92,8 @@ public class DataSeeder implements CommandLineRunner {
             InstallmentRepository installments,
             RepactationRepository repactations,
             DebtEventRepository events,
-            ObjectMapper json
+            ObjectMapper json,
+            @Value("${app.demo.datos:true}") boolean historia
     ) {
         this.organizations = organizations;
         this.debtors = debtors;
@@ -99,6 +104,7 @@ public class DataSeeder implements CommandLineRunner {
         this.repactations = repactations;
         this.events = events;
         this.json = json;
+        this.historia = historia;
     }
 
     @Override
@@ -107,6 +113,9 @@ public class DataSeeder implements CommandLineRunner {
         patrimonio = organizacion("76418902-7", "Patrimonio Inmuebles SpA", "Patrimonio Inmuebles",
                 Organization.Kind.creditor);
         apofyx = organizacion("77305118-6", "APOFYX SpA", "APOFYX", Organization.Kind.agency);
+        if (!historia) {
+            return;
+        }
         agosto = lote("APX-2026-08-19-003", LocalDate.of(2026, 8, 18), cl("2026-08-19T10:12"), 8, 6);
         septiembre = lote("APX-2026-09-19-004", LocalDate.of(2026, 9, 18), cl("2026-09-19T10:05"), 8, 7);
 
@@ -429,7 +438,7 @@ public class DataSeeder implements CommandLineRunner {
         }
         Long pesos = montoClp != null ? montoClp : monto.longValueExact();
         DetallePago detalle = new DetallePago(null, pesos, valorUf, pasarela,
-                lugares.stream().map(l -> l + 1).toList(), plan.size());
+                lugares.stream().map(l -> l + 1).toList(), plan.size(), null);
         DebtEvent aplicado = DebtEvent.de(deuda, DebtEvent.Type.payment_applied, DebtEvent.Actor.system)
                 .conMonto(monto, deuda.getCurrency())
                 .conReferencia(pasarela + ":" + transaccion)

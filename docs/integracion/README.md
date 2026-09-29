@@ -226,12 +226,12 @@ Las que no caben en JSON Schema las aplica cada receptor al recibir:
 | `sin_canal_contacto` | El deudor no trae ni correo ni teléfono |
 | `monto_invalido` | Monto ≤ 0, CLP con decimales, o UF con más de 2 decimales |
 | `cargo_no_vencido` | Un cargo vence en o después de `fecha_corte`: todavía no es mora |
-| `mora_fuera_de_mandato` | La mora supera el máximo de la agencia. **Para APOFYX son 120 días**: después devuelve el caso al acreedor (su §2.2). APOFYX lo aplica al recibir; DataBridge lo vuelve a revisar contra el mandato |
+| `mora_fuera_de_mandato` | La mora supera el máximo de la agencia. **Para APOFYX son 120 días**: después devuelve el caso al acreedor (su §2.2). APOFYX lo aplica al recibir; DataBridge lo vuelve a revisar contra el mandato. Si la deuda ya estaba en gestión, la devolución es de verdad: APOFYX la saca de su cartera y le pasa el retiro a DataBridge, con el motivo `fuera_de_mandato`, para que deje de cobrarla |
 | `id_duplicado_en_lote` | Dos deudas con el mismo `id_externo` en el mismo lote |
 | `deuda_no_encontrada` | Se pide `retirar` una deuda que el receptor no tiene |
-| `deuda_saldada` | Se pide actualizar o retirar una deuda que ya se pagó |
+| `deuda_saldada` | Se pide retirar una deuda que ya se pagó, o actualizarla con algún cargo que ya se pagó. Con cargos posteriores a los pagados no es un error: el deudor se volvió a atrasar, y la deuda vuelve a cobranza |
 | `campana_desconocida` | El `mandato` apunta a una campaña que esa agencia no registró para ese acreedor |
-| `bajo_umbral_mora` | **Solo DataBridge.** Una deuda nueva con menos meses impagos que su umbral (dos, por omisión): DataBridge cobra a deudores morosos. Se cuentan meses distintos (el `periodo` del cargo, o el mes de su vencimiento), no cargos. Una deuda que ya está en gestión puede volver con menos: el deudor pagó una parte directo |
+| `bajo_umbral_mora` | **Solo DataBridge.** Una deuda nueva —o una pagada que vuelve— con menos meses impagos que su umbral (dos, por omisión): DataBridge cobra a deudores morosos. Se cuentan meses distintos (el `periodo` del cargo, o el mes de su vencimiento), no cargos. Una deuda que ya está en gestión puede volver con menos: el deudor pagó una parte directo |
 
 **La mora la calcula el receptor, no el emisor.** Son los días entre el vencimiento del cargo
 impago más antiguo y `fecha_corte`. Mandarla calculada abriría la puerta a que no calce con los
@@ -245,9 +245,22 @@ motivo. Un RUT mal escrito no bloquea las otras 4.999.
 **Actualizar y retirar.** Mandar de nuevo una deuda con el mismo `id_externo` la actualiza: por
 ejemplo, si el arrendatario pagó una parte en la oficina y Patrimonio manda el saldo menor.
 `"accion": "retirar"` la saca de la gestión; el motivo es obligatorio (`pago_directo`,
-`acuerdo_directo`, `error`, `disputa_resuelta`, `otro`). APOFYX reenvía actualizaciones y retiros a
-DataBridge igual que las altas. **El acreedor manda sobre la deuda original; DataBridge manda sobre
-lo que se pagó a través de él.**
+`acuerdo_directo`, `error`, `disputa_resuelta`, `fuera_de_mandato`, `otro`). El de
+`fuera_de_mandato` lo pone la agencia cuando devuelve un caso. APOFYX reenvía actualizaciones y
+retiros a DataBridge igual que las altas. **El acreedor manda sobre la deuda original; DataBridge
+manda sobre lo que se pagó a través de él.**
+
+**El mes siguiente.** El acreedor vuelve a mandar cada mes a todos sus morosos, y eso no deshace lo
+que el deudor ya acordó:
+
+- **Una deuda en convenio conserva su convenio.** Si el acreedor informa un mes nuevo, DataBridge lo
+  agrega como una cuota aparte, fuera del convenio. Si informa menos de lo que queda del convenio
+  —le pagaron una parte en la oficina—, se descuenta de las últimas cuotas, y el plan termina antes.
+  Un pago que todavía no le llega al acreedor cuando emite su cartera aparece como deuda, y se
+  corrige solo con la cartera siguiente.
+- **Una deuda pagada vuelve con cargos nuevos.** Si el deudor se atrasa otra vez en el mismo
+  contrato, la deuda se reabre, siempre que todos sus cargos sean posteriores a los que se pagaron.
+  En DataBridge cuenta como una entrada nueva: exige de nuevo el mínimo de meses impagos.
 
 ### 6.5 Respuesta
 

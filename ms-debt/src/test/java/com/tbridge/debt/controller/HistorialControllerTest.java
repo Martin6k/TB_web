@@ -60,7 +60,7 @@ class HistorialControllerTest {
     void los_pagos_van_en_embedded_con_su_comprobante() throws Exception {
         when(historial.pagos(any())).thenReturn(List.of(new PagoResponse(57L, 3L, "CTR-2025-014",
                 "Patrimonio Inmuebles", "Felipe Rojas Muñoz", "16482337-7", "Arriendo mensual", Debt.Currency.CLP,
-                new BigDecimal("346666"), 346666L, null, "webpay", "wp-9f31c2", List.of(4, 5), 6,
+                new BigDecimal("346666"), 346666L, null, "webpay", "wp-9f31c2", List.of(4, 5), 6, null,
                 Instant.parse("2026-09-23T15:30:00Z"))));
 
         mvc.perform(get("/api/debts/pagos").header("Authorization", deudor()).header("X-Forwarded-Host", "localhost:8080"))

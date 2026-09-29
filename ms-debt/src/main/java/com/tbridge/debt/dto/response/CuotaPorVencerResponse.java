@@ -19,11 +19,14 @@ public record CuotaPorVencerResponse(
         @Schema(example = "CLP") Debt.Currency moneda,
         @Schema(example = "173333") BigDecimal monto,
         @Schema(example = "2026-10-20") LocalDate vencimiento,
-        @Schema(description = "Su lugar dentro del plan", example = "4") int lugar,
-        @Schema(description = "Cuantas cuotas tiene el plan", example = "6") int deCuotas,
+        @Schema(description = "Su lugar dentro del plan. 0 si no es de un convenio", example = "4") int lugar,
+        @Schema(description = "Cuantas cuotas tiene el plan. 0 si no es de un convenio", example = "6") int deCuotas,
         @Schema(description = "Dias que faltan. Negativo si ya vencio", example = "25") long dias,
         @Schema(example = "false") boolean vencida,
         @Schema(description = "Si es cuota de un convenio, o el pago de una deuda sin convenio", example = "true")
-        boolean enConvenio
+        boolean enConvenio,
+        @Schema(description = "Si es un mes que el acreedor informo despues de que el deudor acepto su convenio: "
+                + "se paga aparte", example = "false")
+        boolean fueraDelConvenio
 ) {
 }

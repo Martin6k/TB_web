@@ -5,6 +5,15 @@
 Plataforma de pago y repactación de deudas. Proyecto de Capstone; las empresas, las personas y
 los RUT son ficticios.
 
+**Contexto:** Kobra fue el cliente directo original del equipo y se retiró. Para continuar el
+Capstone se creó **APOFYX como cliente ficticio**. DataBridge es la solución tecnológica que
+se demuestra con APOFYX y con Patrimonio Inmuebles como acreedor ficticio. Las pasarelas de
+pago de esta implementación son simulaciones.
+
+La [evaluación local](#evaluación-local-del-29-de-septiembre-de-2026) reúne resultados actuales
+y límites. La [evaluación general](../EVALUACION_GENERAL.md) conecta las tres aplicaciones
+cuando están juntas en la carpeta Capstone; la bitácora `Technical-Bridge/` queda excluida.
+
 **Todo el sistema se levanta con una orden** y queda en http://localhost:8080 — no hace falta
 tener instalado JDK, Node ni Python, solo Docker:
 
@@ -41,6 +50,13 @@ recordatorio si no lo quiere.
 impagos** (`MIN_MESES_IMPAGOS`); con menos todavía no es mora, y se rechaza sola al recibir la
 cartera con el código `bajo_umbral_mora`. Se cuentan meses, no cargos: el arriendo y el gasto
 común de septiembre son un solo mes.
+
+**El mes siguiente**, el acreedor vuelve a mandar su cartera, y eso no deshace lo que el deudor ya
+acordó. Un convenio sigue en pie: el mes nuevo se agrega como una cuota aparte, que el portal
+marca *Fuera del convenio*. Una deuda pagada se reabre si el deudor se vuelve a atrasar, y cuenta
+como una entrada nueva, con el mismo mínimo de dos meses. Y la que pasa los 120 días de mora, APOFYX
+la devuelve al acreedor y DataBridge deja de cobrarla (`fuera_de_mandato`). El detalle está en las
+[reglas de la cartera](docs/integracion/README.md#64-reglas-de-validación).
 
 Del otro lado, la empresa que gestiona la cartera la ve al día, carga deudas nuevas por API o
 arrastrando un CSV, le envía el código al deudor y mira en un panel cuánto se ha recuperado.
@@ -88,9 +104,10 @@ a las 11 de la noche si quiere, y el acreedor se entera sin que nadie escriba un
 | **Servidor web** | nginx (sin privilegios) | Sirve el portal compilado y hace de proxy al gateway |
 | **Correo** | Mailpit | Buzón de prueba: recibe los códigos sin mandárselos a nadie |
 
-**Nube:** ninguna. El sistema corre entero en contenedores, así que puede desplegarse en
-cualquier proveedor que acepte Docker, pero **hoy no depende de ningún servicio administrado**.
-La única dependencia externa es la API del Banco Central para el valor de la UF, y es opcional.
+**Despliegue de referencia:** local, con contenedores. Un despliegue remoto requiere preparar
+su configuración y operación. Las dependencias externas opcionales son la API del Banco
+Central para obtener la UF y el proveedor de LLM configurado para `ms-ai` mediante
+`XAI_API_KEY` y `XAI_BASE_URL`. Sin LLM funciona el motor de reglas; la UF puede cargarse manualmente.
 
 ---
 
@@ -528,7 +545,7 @@ componente con su interfaz HTTP, su base propia y sus dependencias dibujadas.
 | **Seguridad** · autenticación | El deudor entra con RUT + 6 caracteres, sin cuenta ni contraseña. Un solo uso, 24 h, 5 intentos. El alfabeto excluye `0 O 1 I L` porque el código se dicta por teléfono | `ms-auth/AuthService` |
 | **Seguridad** · sesión | El JWT dura **15 minutos** y vive en la memoria de la pestaña, no en `localStorage`. Lo que mantiene a alguien adentro es una llave de renovación de 256 bits en una cookie `HttpOnly`, `SameSite=Strict` y limitada a `/api/auth`, que ningún script de la página puede leer. Cada uso la cambia por otra; cerrar sesión la revoca **en el servidor**; y si una llave ya usada vuelve a aparecer —alguien la copió— se revoca toda la sesión | `ms-auth/SessionService`, `V2__sesiones.sql` |
 | **Seguridad** · origen | Cada freno cuenta por IP, así que la IP no se puede inventar: nginx sobrescribe `X-Forwarded-For` con la que vio, y el gateway solo le cree a sus proxies de confianza (`TRUSTED_PROXIES`). CORS acepta solo los orígenes del portal (`CORS_ORIGINS`), no `*` | `frontend/nginx.conf`, `gateway/ClienteReal` |
-| **Seguridad** · secretos | Solo se guardan hashes: `SHA-256(rut:código)`, del token del enlace, de la clave de API y de la IP. Nada reversible | `V1__esquema_inicial.sql` |
+| **Seguridad** · secretos | Códigos de acceso, tokens de enlace y claves de API se verifican mediante hashes. Los secretos HMAC de suscripciones sí deben recuperarse para firmar y actualmente se almacenan en `subscriptions.secret`; su protección en reposo queda pendiente para un despliegue real | `V1__esquema_inicial.sql`, `db/README.md` |
 | **Seguridad** · enumeración | "No hay código" y "código incorrecto" responden **lo mismo**, para que nadie pueda averiguar qué RUT tienen deuda | `AuthService.entrarConCodigo` |
 | **Seguridad** · autorización | Cada sesión se identifica por RUT. Un deudor ve y paga solo lo suyo; una agencia ve solo la cartera que le corresponde por mandato | `DebtService.acreedorDe` |
 | **Seguridad** · integridad | Los eventos van firmados con HMAC-SHA256, caducan a los 5 minutos y se descartan si llegan repetidos | `docs/integracion/README.md` §8 |
@@ -539,10 +556,10 @@ componente con su interfaz HTTP, su base propia y sus dependencias dibujadas.
 | **Rendimiento** · límite de peticiones | Dos capas: el gateway deja 10 por minuto en `/api/auth/**` y 120 globales por IP, y `ms-auth` bloquea diez minutos al origen que falla diez códigos. **Medido:** el gateway corta en la petición 11, se recarga solo, y lo que pasa lo frena `ms-auth` | `gateway/RateLimitFilter`, `AuthService` |
 | **Rendimiento** · consultas | Trece índices en `tb_debt` para los caminos que se usan: `ix_debt_creditor_status` (la cartera de un acreedor), `ix_debt_debtor` (lo que debe una persona), `ix_batch_creditor`. Los `UNIQUE` hacen doble trabajo: `uq_payment_gateway` evita cobrar dos veces la misma transacción y además es el índice con que se busca | `V1__esquema_inicial.sql` |
 | **Rendimiento** · memoria | La JVM lee el límite del contenedor (`MaxRAMPercentage=75`), no el de la máquina, y cada servicio tiene su tope declarado | `*/Dockerfile` |
-| **Rendimiento** · portal | La página de la empresa, que trae los gráficos, se descarga solo al entrar a ella: el deudor baja 264 kB en vez de 685 kB | `frontend/src/App.jsx` |
+| **Rendimiento** · portal | La página de la empresa, que trae los gráficos, se carga de forma diferida. En el build del 29-09-2026 el JS principal fue 315,35 kB y el bloque de DataBridge 418,22 kB, antes de gzip; no representan por sí solos toda la transferencia de una sesión | `frontend/src/App.jsx` |
 | **Rendimiento** · simulador | El deslizador del plazo consulta el plan cuando lleva un segundo quieto, y guarda cada plazo ya calculado. Antes cada paso era una consulta: deslizarlo de punta a punta mandaba 18 seguidas y el gateway lo cortaba con "Demasiadas solicitudes". **Medido:** de 7 a 24 meses, una sola consulta; volver a un plazo ya visto, ninguna | `frontend/src/pages/Repact.jsx` |
 | **Usabilidad** | Tema claro (crema y verde bosque) y oscuro (negro carbón y morado): sigue al del sistema hasta que la persona elige uno, y lo recuerda. Quien pidió menos movimiento al sistema no ve animaciones. La barra de estado se anuncia como barra de progreso a los lectores de pantalla | `frontend/src/index.css`, `store/temaStore.js` |
-| **Escalabilidad** | Ningún servicio guarda sesión: la identidad viaja en el JWT, así que `docker compose up --scale gateway=3` funciona sin más. Cada servicio tiene su base y el trabajo pesado va por colas. **Límite conocido:** ms-debt y ms-payments tienen tareas programadas (`EventDispatcher`, `CampanaAvanceService`, `NotificationDispatcher`, `UfLoader`) que correrían en cada copia y harían el trabajo dos veces; replicarlos exige coordinarlas primero. Replicables hoy: gateway, ms-ai y portal | |
+| **Escalabilidad** | La identidad de acceso viaja en JWT y las sesiones de renovación se persisten en `tb_auth`. El gateway mantiene sus límites por IP en memoria local: replicarlo requiere coordinar cuotas. ms-debt y ms-payments tienen tareas programadas que ejecutarían trabajo en cada réplica; también necesitan coordinación. La réplica del portal exige resolver su puerto publicado. La topología con varias instancias no se validó en esta revisión | `SessionService`, `RateLimitFilter`, `EventDispatcher`, `NotificationDispatcher` |
 | **Disponibilidad** | Los nueve contenedores declaran `healthcheck` y ninguno arranca antes que aquel del que depende. La salud de los servicios la da Actuator (`/actuator/health`), que incluye la conexión a la base: un servicio sin base no se declara sano. `restart: unless-stopped` los repone si se caen | `docker-compose.yml` |
 | **Disponibilidad** · entrega | Todo lo que sale hacia otro sistema pasa por una bandeja con reintentos (1 min, 5 min, 30 min, 2 h, 6 h, 24 h). Si DataBridge está caído, APOFYX sigue recibiendo carteras y lo pendiente se entrega solo cuando vuelve | `outbox`, `NotificationDispatcherTest` |
 | **Portabilidad** | Una orden levanta el sistema entero en cualquier máquina con Docker, sin instalar JDK, Node ni Python | `docker-compose.yml` |
@@ -606,7 +623,7 @@ se corren con Maven.
 | `XAI_API_KEY` | vacía | El LLM del asistente. Sin ella, responde con reglas |
 | `MIN_MESES_IMPAGOS` | `2` | El alcance: desde cuántos meses impagos entra una deuda a cobranza. Con menos se rechaza (`bajo_umbral_mora`) |
 | `RECORDATORIO_DIAS_ANTES` | `3` | Cuántos días antes de cada cuota le llega al deudor el recordatorio. Se revisa cada mañana a las 9:00 (`RECORDATORIO_CRON`) y nunca se repite para la misma cuota |
-| `DEMO_DATOS` | `true` | Carga al arrancar la cartera de ejemplo ([§3](#para-entrar-como-deudor)). Solo agrega el deudor que falte: una base con datos propios no pierde nada |
+| `DEMO_DATOS` | `true` | Carga al arrancar la cartera de ejemplo ([§3](#para-entrar-como-deudor)). Solo agrega el deudor que falte: una base con datos propios no pierde nada. Con `false` quedan registradas igual las dos organizaciones de la cadena, Patrimonio y APOFYX |
 | `RATE_AUTH_CAPACITY`, `RATE_GLOBAL_CAPACITY` | `10` / `120` | Peticiones por minuto |
 | `EVENTS_RABBIT` | `true` en Docker, `false` con Maven | Si el aviso de pago va por RabbitMQ o por HTTP |
 | `SWAGGER_ENABLED` | `true` | Apagar la documentación, por ejemplo en producción |
@@ -630,12 +647,12 @@ base de datos**, así que corren en segundos en cualquier equipo.
 | Tipo | Qué cubre | Dónde |
 | --- | --- | --- |
 | **Unitarias** (JUnit 5 + Mockito) | Las reglas de cada servicio con los repositorios simulados (`@Mock`, `@InjectMocks`): que cada quien vea solo lo suyo, que el monto del cobro salga de ms-debt y no del navegador, que un pago avisado dos veces se abone una, que repactar anule las cuotas en vez de borrarlas,
-que las cuotas se paguen en orden, que solo entren deudores morosos, la sesión revocable (rotación, robo, dos pestañas), el código de acceso, la UF, la firma de los eventos, el recordatorio (uno por cuota, sin monto ni enlace) y qué cuotas cubrió cada pago. Una prueba fija byte a byte el JSON de un evento firmado: si cambiara, APOFYX lo rechazaría | `*/src/test/java/.../service/` |
+que las cuotas se paguen en orden, que solo entren deudores morosos, que un convenio sobreviva a la cartera del mes siguiente y que una deuda pagada se reabra solo con cargos nuevos, la sesión revocable (rotación, robo, dos pestañas), el código de acceso, la UF, la firma de los eventos, el recordatorio (uno por cuota, sin monto ni enlace) y qué cuotas cubrió cada pago. Una prueba fija byte a byte el JSON de un evento firmado: si cambiara, APOFYX lo rechazaría | `*/src/test/java/.../service/` |
 | **De integración de la capa web** (`@WebMvcTest` + MockMvc) | Cada controlador con su seguridad, su validación y su JSON de verdad, y los servicios simulados (`@MockitoBean`): `401` sin sesión, `403` con la deuda de otro, `400` con datos malos, la forma de cada respuesta, los `_links` de HATEOAS según quién mira y con la dirección pública, la cookie de la sesión, y los nombres del contrato v1 intactos | `*/src/test/java/.../controller/` |
 | **De seguridad** | En cada push, **CodeQL** (análisis estático de Java, JavaScript y Python), una auditoría de dependencias que rompe el build ante una vulnerabilidad alta, y Dependabot (también para las imágenes base de Docker). Con tráfico real: los dos frenos contra fuerza bruta y que una IP inventada no da un cupo nuevo | `.github/workflows/`, [`rendimiento/limite.js`](rendimiento/limite.js) |
 | **De rendimiento** (k6) | Cómo lo siente una persona (100 usuarios, p95 de 7 a 12 ms según el día) y dónde está el techo (unas 1.800 peticiones por segundo). La prueba de estrés encontró que nginx se quedaba sin puertos a las 500 por segundo; ya está arreglado | [`rendimiento/`](rendimiento/README.md) |
 
-**192 pruebas en Java y 12 en Python.** Corren solas en **GitHub Actions** con cada push; las de
+**204 pruebas en Java y 12 en Python.** Corren solas en **GitHub Actions** con cada push; las de
 rendimiento necesitan el sistema arriba y se corren a mano.
 
 ---
@@ -702,3 +719,89 @@ Invoke-RestMethod -Method Post -Uri "http://localhost:8084/internal/uf" `
 Este repositorio es una de tres piezas:
 [**Patrimonio Inmuebles**](https://github.com/TechnicalBridge/patrimonioinmuebles) →
 [**APOFYX**](https://github.com/TechnicalBridge/APOFYX) → **DataBridge**.
+
+## Evaluación local del 29 de septiembre de 2026
+
+### Estado y evidencia
+
+DataBridge es el núcleo técnico del Capstone. Implementa ingreso, consulta de deuda, repactación,
+checkout simulado, confirmación, conciliación interna y eventos de vuelta al cliente ficticio.
+El valor que puede demostrarse es la continuidad del proceso y su trazabilidad; las cifras del
+escenario no prueban resultados comerciales con deudores reales.
+
+| Verificación | Resultado |
+| --- | --- |
+| `common` | 18 pruebas Java aprobadas |
+| `gateway` | 11 pruebas Java aprobadas |
+| `ms-auth` | 40 pruebas Java aprobadas |
+| `ms-debt` | 104 pruebas Java aprobadas |
+| `ms-payments` | 31 pruebas Java aprobadas |
+| Total Java | **204**, sin fallos, errores ni omisiones; Maven `BUILD SUCCESS` |
+| `ms-ai` | **12 pruebas Python aprobadas** del motor local y formato de deuda |
+| Frontend | Build correcto; 754 módulos; salida de revisión en carpeta temporal |
+| Compose con perfil `app` | Configuración válida, 9 servicios |
+| Despliegue existente | 9 contenedores saludables; portal en 8080 respondió HTTP 200 |
+
+Maven se ejecutó con **JDK 25**. El `java` global de este equipo resolvía Java 17, por lo que
+se fijó `JAVA_HOME` solo en el proceso de prueba. No se modificó la configuración global.
+Las imágenes existentes no se reconstruyeron: su salud no certifica que incorporen todos los
+cambios del árbol local.
+
+### Lo que las pruebas demuestran y sus límites
+
+La suite Java prueba reglas y controladores con JUnit, Mockito y MockMvc. Verifica pertenencia
+de deudas, validaciones, cuotas, eventos, sesiones y respuestas HTTP sin necesitar MySQL. Esto
+no reemplaza ejecutar las migraciones y operaciones sobre el motor real. El asistente se probó
+con sus reglas locales; no se consultó un proveedor externo.
+
+Las compilaciones comprueban que el frontend puede empaquetarse. No se ejecutó una suite de
+navegador ni se midió accesibilidad. Los resultados de k6 del 23 y 24 de septiembre son
+antecedentes conservados en `rendimiento/README.md`, no mediciones nuevas de esta revisión.
+Tampoco se consultó el último resultado de GitHub Actions o CodeQL.
+
+### Fortalezas comprobables
+
+- `ms-payments` obtiene el importe y el dueño de la deuda desde `ms-debt`. El navegador no
+  define arbitrariamente el monto que el servidor acepta cobrar.
+- El estado de autenticación contempla renovación y revocación en servidor, además del JWT
+  de acceso. Las pruebas cubren rotación y reutilización indebida del token de renovación.
+- El contrato de integración agrupa datos por acreedor, mandato, campaña y lote; el receptor
+  puede rechazar deudas individualmente y responder sin duplicar una entrega.
+- Los avisos de pago y los eventos salientes quedan persistidos para su entrega posterior.
+  Los receptores deduplican; la entrega repetida forma parte del diseño.
+- Flyway y `ddl-auto=validate` hacen explícitos los cambios de esquema. `common` centraliza
+  identidad y errores, y cada servicio conserva responsabilidades distinguibles.
+- El asistente consulta las deudas con la autorización del propio deudor y carece de una
+  conexión independiente a la base. Su endpoint conversacional es de lectura.
+
+### Pendientes priorizados
+
+| Prioridad | Pendiente | Evidencia o criterio de cierre |
+| --- | --- | --- |
+| Alta para la entrega | Mantener explícita la simulación de Webpay, Mercado Pago y Khipu | No presentar el checkout de demo como integración de un proveedor real |
+| Alta para validar la versión final | Ejecutar la cadena separada con imágenes actuales | Guardar resultado de cartera, pago, convenio posterior, reapertura y retiro |
+| Media | Probar persistencia y migraciones con MySQL además de los mocks | Arranque desde base vacía y actualización de una base previa sin pérdida |
+| Media | Actualizar `docs/plan-kanban.md` | Docker ya existe; NLP está en `ms-ai/app/services/nlp.py`; reconciliar fechas y pendientes |
+| Media | Resolver tareas periódicas y límites antes de replicar | Coordinar despachadores; el mapa de límites del gateway es local y no elimina entradas antiguas |
+| Media | Completar protección de secretos y política de datos | Secretos HMAC recuperables, usuarios por base, retención I12 y restauración de respaldo |
+| Media | Cerrar o excluir formalmente funcionalidades incompletas | `deuda.disputada` se puede suscribir, pero el portal aún no origina ese evento; métricas de entrega dependen de un proveedor de mensajería |
+| Media | Completar roles y UML que exija la entrega | Roles actuales y diagrama de clases del dominio si corresponde |
+
+Integrar pasarelas reales, WhatsApp u otros servicios no es requisito implícito para esta
+demostración: debe decidirse según el alcance final del Capstone y distinguirse de lo ya
+implementado. El análisis de sentimiento actual usa reglas; no acredita entrenamiento ni
+precisión de un modelo de aprendizaje automático.
+
+### Referencias operativas
+
+| Necesidad | Punto de partida |
+| --- | --- |
+| Entender el formato que debe enviar APOFYX | [Contrato de integración](docs/integracion/README.md) |
+| Cambiar datos persistentes | [Bases y Flyway](db/README.md), migraciones del servicio responsable |
+| Explicar capacidad y límites de medición | [Rendimiento](rendimiento/README.md) |
+| Entender decisiones respecto del plan | [Plan técnico](docs/plan-kanban.md), considerando los desajustes indicados |
+| Reproducir el conjunto desde la carpeta padre | [README de Capstone](../README.md) y [prueba guiada](../PRUEBA-GUIADA.md) |
+
+Un HTTP 200 del portal solo confirma la entrega de esa página. Para diagnosticar el backend
+hay que consultar la salud del servicio correspondiente dentro de su red o revisar su estado
+de contenedor; no debe confundirse la respuesta de la SPA con una respuesta de Actuator.

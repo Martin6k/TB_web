@@ -429,7 +429,7 @@ public class DebtService {
         DebtEvent aplicado = DebtEvent.de(deuda, DebtEvent.Type.payment_applied, DebtEvent.Actor.system)
                 .conMonto(aviso.amount(), moneda)
                 .conReferencia(referencia)
-                .conDetalle(detalleDelPago(aviso, vigentes, pagadas));
+                .conDetalle(detalleDelPago(deuda, aviso, vigentes, pagadas));
         aplicado.setOccurredAt(pagadoEn);
         events.save(aplicado);
         eventos.publicar(deuda, EventosService.PAGO_CONFIRMADO, datosDelPago(deuda, aviso, moneda, pagadoEn), pagadoEn);
@@ -462,16 +462,35 @@ public class DebtService {
                 EventosService.enChile(pagadoEn));
     }
 
-    /** El {@link DetallePago} de este aviso, en JSON. Si no se puede escribir, el pago igual se aplica. */
-    private String detalleDelPago(PagoConfirmado aviso, List<Installment> vigentes, List<Installment> pagadas) {
-        List<Long> orden = vigentes.stream().map(Installment::getId).toList();
-        List<Integer> lugares = pagadas.stream()
-                .map(c -> orden.indexOf(c.getId()) + 1)
-                .filter(lugar -> lugar > 0)
-                .sorted()
-                .toList();
+    /**
+     * El {@link DetallePago} de este aviso, en JSON. Si no se puede escribir, el pago igual se aplica.
+     *
+     * <p>En convenio, el lugar de cada cuota se cuenta dentro del plan ("la 4 de 6"), y una cuota aparte
+     * se cuenta aparte. Sin convenio, el pago es el total de la deuda.
+     */
+    private String detalleDelPago(Debt deuda, PagoConfirmado aviso, List<Installment> vigentes,
+                                  List<Installment> pagadas) {
+        List<Long> plan = deuda.getStatus() != Debt.Status.repacted ? List.of()
+                : vigentes.stream().filter(Installment::enConvenio).map(Installment::getId).toList();
+        List<Integer> lugares;
+        int de;
+        long fuera = 0;
+        if (plan.isEmpty()) {
+            lugares = pagadas.isEmpty() ? List.of() : List.of(1);
+            de = 1;
+        } else {
+            lugares = pagadas.stream()
+                    .filter(Installment::enConvenio)
+                    .map(c -> plan.indexOf(c.getId()) + 1)
+                    .filter(lugar -> lugar > 0)
+                    .sorted()
+                    .toList();
+            de = plan.size();
+            fuera = pagadas.stream().filter(c -> !c.enConvenio()).count();
+        }
         DetallePago detalle = new DetallePago(aviso.paymentId(), aviso.amountClp(), aviso.ufValue(),
-                aviso.gateway() == null ? null : aviso.gateway().toLowerCase(Locale.ROOT), lugares, vigentes.size());
+                aviso.gateway() == null ? null : aviso.gateway().toLowerCase(Locale.ROOT), lugares, de,
+                fuera == 0 ? null : (int) fuera);
         try {
             return json.writeValueAsString(detalle);
         } catch (JsonProcessingException e) {

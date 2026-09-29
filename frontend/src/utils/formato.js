@@ -60,12 +60,21 @@ export function cuandoVence(dias) {
 /** Que cubrio un pago: "Cuotas 2 y 3 de 6", "Cuota 1 de 3", "Pago total". */
 export function queSePago(pago) {
   const cuotas = pago.cuotas || [];
-  if (!cuotas.length) return "Abono a la deuda";
-  if (pago.deCuotas === 1) return "Pago total";
+  const fuera = pago.fueraDelConvenio > 0;
+  if (!cuotas.length) return fuera ? "Fuera del convenio" : "Abono a la deuda";
+  if (!fuera && pago.deCuotas === 1) return "Pago total";
   const de = pago.deCuotas ? ` de ${pago.deCuotas}` : "";
-  if (cuotas.length === 1) return `Cuota ${cuotas[0]}${de}`;
-  return `Cuotas ${cuotas.slice(0, -1).join(", ")} y ${cuotas[cuotas.length - 1]}${de}`;
+  const plan = cuotas.length === 1 ? `cuota ${cuotas[0]}${de}`
+    : `cuotas ${cuotas.slice(0, -1).join(", ")} y ${cuotas[cuotas.length - 1]}${de}`;
+  return fuera ? `Fuera del convenio y ${plan}` : plan.charAt(0).toUpperCase() + plan.slice(1);
 }
+
+/**
+ * Lo que suma una deuda: lo que falta mas lo que ya se pago por DataBridge. No es
+ * el monto que informo el acreedor: cuando actualiza la deuda en su cartera del
+ * mes, ese monto ya viene descontado de lo que se pago aca.
+ */
+export const totalDeLaDeuda = (d) => Number(d.saldo) + Number(d.pagado);
 
 /** Suma por moneda: pesos y UF no se pueden sumar entre si. */
 export function porMoneda(filas, campo) {

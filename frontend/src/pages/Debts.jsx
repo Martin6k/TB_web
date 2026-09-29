@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { descargarCertificado, listarDeudas } from "../api/deudas";
-import { dinero, porMoneda, rutLegible } from "../utils/formato";
+import { dinero, porMoneda, rutLegible, totalDeLaDeuda } from "../utils/formato";
 import { useAuth } from "../store/authStore";
 import BarraEstado from "../components/BarraEstado";
 import Cargando from "../components/Cargando";
@@ -98,8 +98,8 @@ function TarjetaDeuda({ deuda: d, i }) {
         </div>
         <div className="deuda-monto">
           <span>{pagada ? "Pagaste" : "Saldo"}</span>
-          <b>{dinero(pagada ? d.montoOriginal : d.saldo, d.moneda)}</b>
-          {abonado ? <small>de {dinero(d.montoOriginal, d.moneda)}</small> : null}
+          <b>{dinero(pagada ? d.pagado : d.saldo, d.moneda)}</b>
+          {abonado ? <small>de {dinero(totalDeLaDeuda(d), d.moneda)}</small> : null}
         </div>
       </div>
 

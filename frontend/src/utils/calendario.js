@@ -15,7 +15,8 @@ export function descargarCalendario(cuotas) {
   const eventos = cuotas.map((c) => {
     const dia = c.vencimiento.replace(/-/g, "");
     const siguiente = diaSiguiente(c.vencimiento);
-    const que = c.enConvenio ? `Cuota ${c.lugar} de ${c.deCuotas}` : "Pago de la deuda";
+    const que = c.enConvenio ? `Cuota ${c.lugar} de ${c.deCuotas}`
+      : c.fueraDelConvenio ? "Pago fuera del convenio" : "Pago de la deuda";
     return [
       "BEGIN:VEVENT",
       `UID:cuota-${c.id}@databridge`,

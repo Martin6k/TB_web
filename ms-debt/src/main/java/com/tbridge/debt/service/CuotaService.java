@@ -54,17 +54,22 @@ public class CuotaService {
             if (deuda.getStatus() != Debt.Status.open && deuda.getStatus() != Debt.Status.repacted) {
                 continue;
             }
+            //  El lugar se cuenta dentro del convenio: una cuota aparte (un mes que
+            //  el acreedor informo despues) no corre la numeracion del plan.
             List<Installment> vigentes = vigentes(deuda);
-            for (int i = 0; i < vigentes.size(); i++) {
-                Installment cuota = vigentes.get(i);
+            List<Installment> delPlan = vigentes.stream().filter(Installment::enConvenio).toList();
+            boolean hayConvenio = deuda.getStatus() == Debt.Status.repacted && !delPlan.isEmpty();
+            for (Installment cuota : vigentes) {
                 if (cuota.getStatus() != Installment.Status.pending) {
                     continue;
                 }
+                boolean delConvenio = cuota.enConvenio();
                 filas.add(new CuotaPorVencerResponse(cuota.getId(), deuda.getId(), deuda.getExternalId(),
                         deuda.getCreditor().getTradeName(), deuda.getConcept(), deuda.getCurrency(),
-                        cuota.getAmount(), cuota.getDueDate(), i + 1, vigentes.size(),
+                        cuota.getAmount(), cuota.getDueDate(),
+                        delConvenio ? delPlan.indexOf(cuota) + 1 : 0, delConvenio ? delPlan.size() : 0,
                         ChronoUnit.DAYS.between(hoy, cuota.getDueDate()), cuota.getDueDate().isBefore(hoy),
-                        cuota.enConvenio()));
+                        delConvenio, hayConvenio && !delConvenio));
             }
         }
         filas.sort(Comparator.comparing(CuotaPorVencerResponse::vencimiento));
@@ -86,7 +91,8 @@ public class CuotaService {
             if (deuda.getStatus() != Debt.Status.repacted) {
                 continue;
             }
-            List<Installment> vigentes = vigentes(deuda);
+            //  Solo las cuotas del plan: el riesgo es que el deudor deje de pagar su convenio.
+            List<Installment> vigentes = vigentes(deuda).stream().filter(Installment::enConvenio).toList();
             List<Installment> vencidas = vigentes.stream()
                     .filter(c -> c.getStatus() == Installment.Status.pending && c.getDueDate().isBefore(hoy))
                     .toList();

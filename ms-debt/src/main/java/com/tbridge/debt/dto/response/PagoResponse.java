@@ -34,6 +34,8 @@ public record PagoResponse(
         String referencia,
         @Schema(description = "El lugar de cada cuota pagada dentro del plan", example = "[4, 5]") List<Integer> cuotas,
         @Schema(description = "Cuantas cuotas tenia el plan al pagar", nullable = true, example = "6") Integer deCuotas,
+        @Schema(description = "Cuotas fuera del convenio que cubrio el pago: meses que el acreedor informo despues",
+                nullable = true, example = "1") Integer fueraDelConvenio,
         Instant pagadoEn
 ) {
 }

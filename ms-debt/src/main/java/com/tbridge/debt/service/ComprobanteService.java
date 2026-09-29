@@ -70,20 +70,23 @@ public class ComprobanteService {
         }
     }
 
-    /** "Cuotas 4 y 5 de 6", "Cuota 3 de 12", o "El total de la deuda". */
+    /**
+     * "Cuotas 4 y 5 de 6", "Cuota 3 de 12", "El total de la deuda", o, si cubrio un mes informado despues
+     * del convenio, "Fuera del convenio" y lo que haya pagado del plan.
+     */
     static String queSePago(PagoResponse pago) {
-        List<Integer> cuotas = pago.cuotas();
-        if (cuotas == null || cuotas.isEmpty()) {
-            return "Un abono a la deuda";
+        List<Integer> cuotas = pago.cuotas() == null ? List.of() : pago.cuotas();
+        boolean fuera = pago.fueraDelConvenio() != null && pago.fueraDelConvenio() > 0;
+        if (cuotas.isEmpty()) {
+            return fuera ? "Fuera del convenio" : "Un abono a la deuda";
         }
-        if (pago.deCuotas() != null && pago.deCuotas() == 1) {
+        if (!fuera && pago.deCuotas() != null && pago.deCuotas() == 1) {
             return "El total de la deuda";
         }
         String de = pago.deCuotas() == null ? "" : " de " + pago.deCuotas();
-        if (cuotas.size() == 1) {
-            return "Cuota " + cuotas.getFirst() + de;
-        }
         List<String> numeros = cuotas.stream().map(String::valueOf).toList();
-        return "Cuotas " + String.join(", ", numeros.subList(0, numeros.size() - 1)) + " y " + numeros.getLast() + de;
+        String plan = numeros.size() == 1 ? "cuota " + numeros.getFirst() + de
+                : "cuotas " + String.join(", ", numeros.subList(0, numeros.size() - 1)) + " y " + numeros.getLast() + de;
+        return fuera ? "Fuera del convenio y " + plan : Character.toUpperCase(plan.charAt(0)) + plan.substring(1);
     }
 }

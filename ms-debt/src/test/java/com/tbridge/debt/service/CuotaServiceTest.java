@@ -145,6 +145,41 @@ class CuotaServiceTest {
         assertEquals(HOY.minusDays(37).atStartOfDay(ZoneId.of("America/Santiago")).toInstant(), convenio.ultimoPago());
     }
 
+    /** Un convenio al dia, con un mes que el acreedor informo despues y que ya vencio. */
+    private Debt convenioConUnMesAparte() {
+        Debt convenio = deuda(7L, Debt.Status.repacted);
+        when(installments.findByDebtOrderByNumberAsc(convenio)).thenReturn(List.of(
+                cuota(convenio, 71, 2, HOY.plusDays(10), Installment.Status.pending, true),
+                cuota(convenio, 72, 3, HOY.plusDays(40), Installment.Status.pending, true),
+                cuota(convenio, 74, 4, HOY.minusDays(3), Installment.Status.pending, false)));
+        return convenio;
+    }
+
+    @Test
+    void un_mes_aparte_no_corre_la_numeracion_del_convenio() {
+        Debt convenio = convenioConUnMesAparte();
+        when(debts.deudasVisibles(deudor)).thenReturn(List.of(convenio));
+
+        List<CuotaPorVencerResponse> cuotas = servicio.vencimientos(deudor);
+
+        assertEquals(List.of(74L, 71L, 72L), cuotas.stream().map(CuotaPorVencerResponse::id).toList());
+        CuotaPorVencerResponse aparte = cuotas.getFirst();
+        assertTrue(aparte.fueraDelConvenio());
+        assertFalse(aparte.enConvenio());
+        assertEquals(0, aparte.lugar());
+        assertEquals(1, cuotas.get(1).lugar());
+        assertEquals(2, cuotas.get(1).deCuotas());
+        assertFalse(cuotas.get(1).fueraDelConvenio());
+    }
+
+    @Test
+    void un_mes_aparte_vencido_no_pone_en_riesgo_el_convenio() {
+        Debt convenio = convenioConUnMesAparte();
+        when(debts.deudasVisibles(empresa)).thenReturn(List.of(convenio));
+
+        assertTrue(servicio.enRiesgo(empresa).isEmpty());
+    }
+
     @Test
     void cada_quien_ve_lo_suyo() {
         assertEquals(HttpStatus.FORBIDDEN,

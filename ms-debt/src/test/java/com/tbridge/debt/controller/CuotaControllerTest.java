@@ -67,7 +67,7 @@ class CuotaControllerTest {
     void los_vencimientos_van_en_embedded_cuotas() throws Exception {
         when(cuotas.vencimientos(any())).thenReturn(List.of(new CuotaPorVencerResponse(72L, 7L, "CTR-2025-027",
                 "Patrimonio Inmuebles", "Arriendo mensual", Debt.Currency.CLP, new BigDecimal("116667"),
-                LocalDate.of(2026, 9, 20), 1, 6, -5, true, true)));
+                LocalDate.of(2026, 9, 20), 1, 6, -5, true, true, false)));
 
         mvc.perform(get("/api/debts/vencimientos").header("Authorization", deudor())
                         .header("X-Forwarded-Host", "localhost:8080"))

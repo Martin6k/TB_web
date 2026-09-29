@@ -111,7 +111,7 @@
         },
         "accion": { "enum": ["registrar", "retirar"], "default": "registrar" },
         "motivo_retiro": {
-          "enum": ["pago_directo", "acuerdo_directo", "error", "disputa_resuelta", "otro"]
+          "enum": ["pago_directo", "acuerdo_directo", "error", "disputa_resuelta", "fuera_de_mandato", "otro"]
         },
         "deudor": { "$ref": "#/definitions/deudor" },
         "moneda": { "enum": ["CLP", "UF"] },

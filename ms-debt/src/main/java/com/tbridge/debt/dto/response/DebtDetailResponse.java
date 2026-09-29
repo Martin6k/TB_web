@@ -54,12 +54,15 @@ public record DebtDetailResponse(
             @Schema(example = "2026-10-24") LocalDate vencimiento,
             @Schema(example = "19.25") BigDecimal monto,
             @Schema(allowableValues = {"pending", "paid", "anulada"}, example = "pending") String estado,
-            @Schema(nullable = true) Instant pagadaEn
+            @Schema(nullable = true) Instant pagadaEn,
+            @Schema(description = "Si es cuota de un convenio. En una deuda en convenio, una que no lo es es un mes "
+                    + "que el acreedor informo despues: se paga aparte", example = "true")
+            boolean enConvenio
     ) {
         public static Cuota from(Installment cuota) {
             String estado = cuota.getStatus() == Installment.Status.void_ ? "anulada" : cuota.getStatus().name();
             return new Cuota(cuota.getId(), cuota.getNumber(), cuota.getDueDate(), cuota.getAmount(), estado,
-                    cuota.getPaidAt());
+                    cuota.getPaidAt(), cuota.enConvenio());
         }
     }
 
