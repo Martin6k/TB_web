@@ -40,7 +40,8 @@ public record CarteraResponse(
     @Schema(description = "Lo que paso con una deuda del lote")
     public record ResultadoDeuda(
             @Schema(example = "CTR-2025-014") String idExterno,
-            @Schema(allowableValues = {"registrada", "actualizada", "sin_cambios", "retirada", "rechazada"},
+            @Schema(allowableValues = {"registrada", "actualizada", "sin_cambios", "retirada", "al_dia",
+                    "rechazada"}, description = "al_dia: el cliente no debe nada, y no se guarda",
                     example = "registrada") String resultado,
             @Schema(description = "Dias entre el cargo impago mas antiguo y la fecha de corte", nullable = true,
                     example = "44") Long moraDias,
@@ -54,6 +55,11 @@ public record CarteraResponse(
 
         public static ResultadoDeuda retirada(String idExterno) {
             return new ResultadoDeuda(idExterno, "retirada", null, null, null);
+        }
+
+        /** Un cliente al dia: no hay nada que cobrarle. */
+        public static ResultadoDeuda alDia(String idExterno) {
+            return new ResultadoDeuda(idExterno, "al_dia", null, null, null);
         }
 
         public static ResultadoDeuda rechazada(String idExterno, List<ErrorDeuda> errores) {

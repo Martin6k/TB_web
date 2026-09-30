@@ -43,7 +43,10 @@ public record DebtSummaryResponse(
         boolean conConvenio,
         @Schema(description = "Cuotas pendientes que ya vencieron. En un convenio, las que hay que ponerse al dia",
                 example = "1")
-        int cuotasVencidas
+        int cuotasVencidas,
+        @Schema(description = "La ultima vez que se le envio el codigo de acceso, sola (al entrar la deuda) o "
+                + "desde el portal. Solo para la empresa; vacio si nunca se le envio", nullable = true)
+        Instant codigoEnviado
 ) {
 
     private static final ZoneId CHILE = ZoneId.of("America/Santiago");
@@ -55,6 +58,11 @@ public record DebtSummaryResponse(
 
     /** Con las cuotas de la deuda: de ellas salen el saldo y el avance. */
     public static DebtSummaryResponse from(Debt deuda, List<Installment> cuotas) {
+        return from(deuda, cuotas, null);
+    }
+
+    /** Para la empresa, ademas, cuando se le envio el codigo al deudor. */
+    public static DebtSummaryResponse from(Debt deuda, List<Installment> cuotas, Instant codigoEnviado) {
         BigDecimal saldo = suma(cuotas, Installment.Status.pending);
         //  Lo pagado es lo que se pago por DataBridge. No sale de restar el saldo
         //  al monto original: cuando el acreedor actualiza la deuda, su monto ya
@@ -90,6 +98,7 @@ public record DebtSummaryResponse(
                 pagadas,
                 vigentes,
                 conConvenio,
-                vencidas);
+                vencidas,
+                codigoEnviado);
     }
 }

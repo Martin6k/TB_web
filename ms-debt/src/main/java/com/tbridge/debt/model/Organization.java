@@ -56,6 +56,7 @@ public class Organization {
     public void setId(Long id) { this.id = id; }
     public String getRut() { return rut; }
     public void setRut(String rut) { this.rut = rut; }
+    public String getLegalName() { return legalName; }
     public void setLegalName(String legalName) { this.legalName = legalName; }
     public String getTradeName() { return tradeName; }
     public void setTradeName(String tradeName) { this.tradeName = tradeName; }

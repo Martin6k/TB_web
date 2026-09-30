@@ -39,6 +39,7 @@ import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
@@ -148,7 +149,20 @@ public class DebtService {
     @Transactional
     public List<DebtSummaryResponse> listFor(JwtPrincipal user) {
         if (user != null && user.isCreditor()) {
-            return debts.carteraDe(organizacionDe(user)).stream().map(this::resumen).toList();
+            List<Debt> cartera = debts.carteraDe(organizacionDe(user));
+            //  Cuando se le envio el codigo a cada deudor, en una sola consulta:
+            //  la empresa ve a quien falta invitar o hay que reenviarselo.
+            Map<Long, Instant> enviado = new HashMap<>();
+            if (!cartera.isEmpty()) {
+                for (DebtEvent evento : events.findByDebtInAndType(cartera, DebtEvent.Type.code_sent)) {
+                    enviado.merge(evento.getDebt().getId(), evento.getOccurredAt(),
+                            (a, b) -> a.isAfter(b) ? a : b);
+                }
+            }
+            return cartera.stream()
+                    .map(d -> DebtSummaryResponse.from(d, installments.findByDebtOrderByNumberAsc(d),
+                            enviado.get(d.getId())))
+                    .toList();
         }
         List<Debt> filas = debts.findByDebtorOrderByUpdatedAtDesc(deudorDe(user));
         filas.forEach(this::anotarIngreso);

@@ -136,6 +136,21 @@ Content-Type: application/json
   contenido responde `409`: un id no se reutiliza.
 - Máximo **5.000 deudas por lote**. Una cartera más grande se parte en varios lotes.
 
+**Conectarse.** Antes de mandar nada, el emisor comprueba su clave. Los dos receptores atienden la
+misma consulta, con la misma respuesta: quién es el dueño de la clave y con quién quedó conectado.
+
+```
+GET /api/v1/cuenta
+Authorization: Bearer <clave de API del emisor>
+
+{ "rut": "76418902-7", "razon_social": "Patrimonio Inmuebles SpA", "nombre": "Patrimonio Inmuebles",
+  "tipo": "acreedor", "receptor": { "rut": "77305118-6", "nombre": "APOFYX" } }
+```
+
+Con eso el sistema del acreedor muestra «Conectado con APOFYX» sin tener el nombre de nadie escrito
+en su código, y se suscribe a los avisos (§8.1). Así un mismo sistema se conecta a cualquier
+agencia, o directo a DataBridge.
+
 ### 6.2 Cómo cambia la cartera de un tramo al otro
 
 **Casi nada, y a propósito.** Cuando APOFYX le pasa la cartera a DataBridge:
@@ -146,7 +161,7 @@ Content-Type: application/json
 | `lote.acreedor` | Patrimonio | **El mismo**: la deuda sigue siendo de Patrimonio |
 | `lote.mandato` | No viene | **APOFYX lo agrega**: su RUT y la campaña a la que asignó la cartera |
 | `deudas[].id_externo` | Los de Patrimonio | **Los mismos.** Es lo que permite que un pago vuelva hasta el contrato correcto |
-| `deudas[]` | Todas las morosas | Las que APOFYX aceptó. Las que rechazó o devolvió (más de 120 días) no siguen |
+| `deudas[]` | Todos los clientes con contrato: los que deben, con sus cargos, y los que están al día, con `cargos: []` | Las que APOFYX aceptó, incluidas las al día. Las que rechazó o devolvió (más de 120 días) no siguen |
 
 **APOFYX no cambia montos ni cargos.** Valida, deduplica, prioriza y decide qué entra a cada
 campaña, pero lo que se debe lo fija el acreedor.
@@ -233,11 +248,24 @@ Las que no caben en JSON Schema las aplica cada receptor al recibir:
 | `campana_desconocida` | El `mandato` apunta a una campaña que esa agencia no registró para ese acreedor |
 | `bajo_umbral_mora` | **Solo DataBridge.** Una deuda nueva —o una pagada que vuelve— con menos meses impagos que su umbral (dos, por omisión): DataBridge cobra a deudores morosos. Se cuentan meses distintos (el `periodo` del cargo, o el mes de su vencimiento), no cargos. Una deuda que ya está en gestión puede volver con menos: el deudor pagó una parte directo |
 
+**Todos los clientes, y el receptor detecta al moroso.** El acreedor no decide quién es moroso ni
+qué retirar: cada mes entrega a todos sus clientes con contrato, deban o no. Lo demás lo detecta
+cada receptor con sus reglas:
+
+| El cliente | Qué hace el receptor |
+| --- | --- |
+| Está al día (`cargos: []`) y el receptor no lo tenía | Responde `al_dia` y **no guarda ningún dato suyo**: no hay nada que cobrarle |
+| Está al día y su deuda estaba en gestión | Le pagó al acreedor por fuera: la cierra como un retiro `pago_directo` |
+| Está al día y su deuda ya estaba pagada o retirada | `al_dia`, sin cambios |
+| Debe | Las reglas de siempre: la mora de la agencia y el mínimo de meses de DataBridge |
+
+Los interesados sin contrato no viajan: no tienen cargos ni pagos que revisar.
+
 **La mora la calcula el receptor, no el emisor.** Son los días entre el vencimiento del cargo
 impago más antiguo y `fecha_corte`. Mandarla calculada abriría la puerta a que no calce con los
 cargos.
 
-**Tramos**, los mismos de `crm_portfoliohandover` en APOFYX: `1-30`, `31-90`, `91-120`.
+**Tramos**: `1-30`, `31-90` y `91-120`. APOFYX los usa para priorizar.
 
 **Aceptación parcial.** Las deudas válidas entran y las inválidas se rechazan una por una, con su
 motivo. Un RUT mal escrito no bloquea las otras 4.999.
@@ -250,8 +278,8 @@ ejemplo, si el arrendatario pagó una parte en la oficina y Patrimonio manda el 
 retiros a DataBridge igual que las altas. **El acreedor manda sobre la deuda original; DataBridge
 manda sobre lo que se pagó a través de él.**
 
-**El mes siguiente.** El acreedor vuelve a mandar cada mes a todos sus morosos, y eso no deshace lo
-que el deudor ya acordó:
+**El mes siguiente.** El acreedor vuelve a mandar cada mes a todos sus clientes con contrato, y eso
+no deshace lo que el deudor ya acordó:
 
 - **Una deuda en convenio conserva su convenio.** Si el acreedor informa un mes nuevo, DataBridge lo
   agrega como una cuota aparte, fuera del convenio. Si informa menos de lo que queda del convenio
@@ -261,6 +289,10 @@ que el deudor ya acordó:
 - **Una deuda pagada vuelve con cargos nuevos.** Si el deudor se atrasa otra vez en el mismo
   contrato, la deuda se reabre, siempre que todos sus cargos sean posteriores a los que se pagaron.
   En DataBridge cuenta como una entrada nueva: exige de nuevo el mínimo de meses impagos.
+
+**La invitación.** Cuando una deuda entra —o vuelve— a cobranza en DataBridge, al deudor le llega
+solo su código de acceso por correo, sin monto ni enlace. La agencia lo puede reenviar desde su
+portal.
 
 ### 6.5 Respuesta
 
@@ -277,13 +309,14 @@ Para el lote de ejemplo, **suponiendo que el RUT de `CTR-2024-007` viniera mal e
     { "id_externo": "CTR-2026-031", "resultado": "registrada", "mora_dias": 13, "tramo": "1-30" },
     { "id_externo": "CTR-2024-007", "resultado": "rechazada",
       "errores": [ { "campo": "deudor.rut", "codigo": "rut_invalido", "mensaje": "El dígito verificador no corresponde" } ] },
-    { "id_externo": "CTR-2025-022", "resultado": "retirada" }
+    { "id_externo": "CTR-2025-022", "resultado": "al_dia" }
   ],
   "campos_ignorados": []
 }
 ```
 
-`resultado` es uno de: `registrada`, `actualizada`, `sin_cambios`, `retirada`, `rechazada`.
+`resultado` es uno de: `registrada`, `actualizada`, `sin_cambios`, `retirada`, `al_dia`,
+`rechazada`. Solo `rechazada` cuenta en `rechazadas`.
 
 ### 6.6 Variante CSV
 
@@ -306,6 +339,7 @@ POST /api/v1/carteras   (multipart/form-data)
 - UTF-8, con o sin BOM. Montos sin separador de miles; en UF se acepta `38,5` o `38.5`.
 - `referencias` va en una sola columna como `clave=valor|clave=valor`.
 - Una fila de retiro lleva solo `deuda_id`, `accion` y `motivo_retiro`.
+- Un cliente al día va en una sola fila, con las columnas de cargo vacías: es `cargos: []`.
 
 Desde el portal de empresas de DataBridge la misma planilla se carga arrastrándola
 (`POST /api/debts/cartera`, con la sesión del personal en vez de la clave de API). No es otra
@@ -324,8 +358,14 @@ Lo que APOFYX le dice a DataBridge **antes** de pasarle una cartera.
 
 ```
 POST /api/v1/mandatos
-{ "acreedor_rut": "76418902-7", "vigente_desde": "2026-09-01", "mora_maxima_dias": 120 }
+{ "acreedor_rut": "76418902-7", "razon_social": "Patrimonio Inmuebles SpA",
+  "nombre_fantasia": "Patrimonio Inmuebles", "vigente_desde": "2026-09-01", "mora_maxima_dias": 120 }
 ```
+
+**Un acreedor nuevo se registra con su mandato.** Si DataBridge no conoce ese RUT, lo registra con
+`razon_social` y `nombre_fantasia`, los mismos nombres de `lote.acreedor`. `nombre_fantasia` es el
+que ve el deudor. Así una empresa nueva de la agencia llega a DataBridge sin que nadie la cargue a
+mano. Un acreedor que ya existe no se toca.
 
 **La agencia responde por el mandato**: es su contrato con el acreedor (§5.2 del documento de
 APOFYX). DataBridge registra quién lo declaró y cuándo, y solo acepta carteras de ese acreedor
@@ -393,7 +433,7 @@ POST /api/v1/suscripciones
 
 `eventos` es opcional (sin él, todos). La respuesta trae el `secreto`. Registrar la misma URL otra
 vez la reactiva y devuelve el mismo secreto, así que la llamada se puede repetir sin romper nada.
-APOFYX hace lo mismo con sus clientes, con `manage.py suscribir_cliente`.
+APOFYX atiende el mismo `POST /api/v1/suscripciones` para sus clientes, con la clave que les emite.
 
 Al reenviar, APOFYX genera un evento nuevo (con su propio `id` y firmado con el secreto de
 Patrimonio) y cambia `lote_id_externo` por el lote original de Patrimonio. `deuda_id_externo` no
@@ -467,7 +507,7 @@ saber que detrás de APOFYX está DataBridge.
 
 | Sistema | Solo | Con archivo | Con API |
 | --- | --- | --- | --- |
-| **Patrimonio** | Cobra arriendos, registra pagos en oficina, lista morosos | Descarga su cartera en CSV v1 y se la manda a APOFYX | Envía la cartera por API a APOFYX y recibe sus eventos |
+| **Patrimonio** | Cobra arriendos, registra pagos en oficina, lista morosos | Descarga su cartera y la sube al portal de su agencia | Se conecta a su agencia desde su panel, le envía la cartera por API y recibe sus eventos |
 | **APOFYX** | Recibe, valida y prioriza carteras; campañas y reportes como hoy, con el pago fuera | Sube la cartera validada en CSV al portal de DataBridge | Reenvía carteras, registra mandatos y campañas, recibe y reenvía eventos |
 | **DataBridge** | Opera con acreedores directos, sin agencia | Recibe CSV desde su portal | Ingesta por API, eventos por webhook |
 
@@ -477,17 +517,22 @@ saber que detrás de APOFYX está DataBridge.
 
 Por ejemplo, un gimnasio que le encarga a APOFYX sus cuotas atrasadas:
 
-1. **APOFYX** lo crea en su CRM (`crm_creditor`, con su RUT) y le entrega una clave de API y un
-   secreto para eventos.
-2. **APOFYX** registra en DataBridge el mandato sobre ese RUT y la campaña. Con eso DataBridge
-   acepta carteras de ese acreedor enviadas por APOFYX.
-3. **El gimnasio arma su cartera v1.** Su adaptador es suyo: lee sus propias tablas (socios,
-   planes, cuotas) y escribe el formato de §6. Lo valida contra el esquema antes de enviarlo.
-4. **Opcional:** registra una URL para recibir eventos y marcar pagos en su sistema.
+1. **El gimnasio se registra** en el portal de empresas de APOFYX (`/empresas/registro/`) con su
+   RUT y los datos de quien lo va a usar. El personal de APOFYX **aprueba su acceso** y le crea la
+   campaña.
+2. **En su portal emite su clave de API.** Su sistema la usa para comprobarla
+   (`GET /api/v1/cuenta`), suscribirse a los avisos (`POST /api/v1/suscripciones`) y entregar su
+   cartera (`POST /api/v1/carteras`). Sin sistema propio, sube la planilla de §6.6 en el mismo
+   portal.
+3. **APOFYX le pasa la cartera a DataBridge** con el mandato del gimnasio, que trae su RUT y sus
+   nombres: DataBridge lo registra ahí la primera vez.
+4. **DataBridge detecta a los morosos**, les envía su código de acceso y los pagos vuelven por la
+   cadena hasta el sistema del gimnasio.
 
-**No hay ningún paso que toque el código de DataBridge ni de APOFYX.** Son altas de datos, y lo
-único que se escribe es el adaptador del gimnasio, en el sistema del gimnasio. Si el gimnasio
-prefiriera no pasar por una agencia, usa el mismo adaptador contra DataBridge directo.
+**No hay ningún paso que toque código, configuración ni la consola** de DataBridge ni de APOFYX.
+Lo único que se escribe es el adaptador del gimnasio, en su propio sistema, y es opcional: la
+planilla sirve igual. Si el gimnasio prefiriera no pasar por una agencia, usa el mismo adaptador
+contra DataBridge directo.
 
 ---
 
@@ -516,7 +561,6 @@ diseña en `TBridgeDB.sql` y reemplaza la ingesta CSV actual.
 - Una app `integracion`, aislada de `crm` y `cartera`: recibe carteras de clientes, se las pasa a
   DataBridge, registra mandatos y campañas, y recibe y reenvía eventos. Con la configuración vacía
   queda apagada.
-- Un rubro nuevo, *Corretaje y arriendos*, para dar de alta a Patrimonio.
 - Columnas de pago en `crm_campaignfunnelsnapshot`, alimentadas por `campana.avance`.
 - `link_clicks` pasa a significar *ingresos al portal*: con código de acceso ya no hay link.
 - **Actualizar su documento**: §2.2 y la cabecera de `AphofyxDB.sql` dicen que no hay tabla de

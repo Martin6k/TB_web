@@ -16,6 +16,8 @@ public interface DebtEventRepository extends JpaRepository<DebtEvent, Long> {
 
     List<DebtEvent> findByDebtIn(Collection<Debt> debts);
 
+    List<DebtEvent> findByDebtInAndType(Collection<Debt> debts, DebtEvent.Type type);
+
     /** El historial de pagos: con un tope, porque es una pantalla y no un reporte. */
     List<DebtEvent> findTop300ByDebtInAndTypeOrderByOccurredAtDesc(Collection<Debt> debts, DebtEvent.Type type);
 

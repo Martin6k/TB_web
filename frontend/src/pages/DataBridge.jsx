@@ -164,8 +164,14 @@ export default function DataBridge() {
                         {cobrable ? (
                           <button type="button" className="btn btn-soft btn-sm" disabled={aviso?.enviando}
                                   onClick={() => enviarCodigo(d)}>
-                            {aviso?.enviando ? <><span className="girando" /> Enviando…</> : "Enviar código"}
+                            {aviso?.enviando ? <><span className="girando" /> Enviando…</>
+                              : d.codigoEnviado ? "Reenviar código" : "Enviar código"}
                           </button>
+                        ) : null}
+                        {cobrable && !aviso ? (
+                          <span className="sub">
+                            {d.codigoEnviado ? `Invitado el ${fecha(d.codigoEnviado)}` : "Todavía sin invitar"}
+                          </span>
                         ) : null}
                         {aviso?.ok ? <span className="sub">{aviso.ok}</span> : null}
                         {aviso?.error ? <span className="sub" style={{ color: "var(--danger)" }}>{aviso.error}</span> : null}
@@ -178,7 +184,8 @@ export default function DataBridge() {
           </div>
         )}
         <p className="hint">
-          El código va al correo del deudor y no se muestra aquí: quien lo viera podría entrar en su lugar.
+          Al entrar su deuda, al deudor le llega solo su código de acceso. Con el botón se le reenvía. El código
+          va a su correo y no se muestra aquí: quien lo viera podría entrar en su lugar.
         </p>
       </div>
     </div>

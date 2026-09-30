@@ -45,6 +45,10 @@ public class MandatoService {
      * <p><b>La agencia responde por el mandato:</b> es su contrato con el
      * acreedor. DataBridge registra quien lo declaro y cuando, que es lo que
      * permite reconstruir despues con que autorizacion se cobro.
+     *
+     * <p>Por lo mismo, <b>un acreedor que DataBridge no conoce se registra aca</b>,
+     * con los nombres que manda la agencia. Asi una empresa nueva de la agencia
+     * entra sin que nadie la cargue a mano en DataBridge.
      */
     @Transactional
     public MandatoResponse registrarMandato(Organization agencia, MandatoRequest pedido) {
@@ -52,7 +56,7 @@ public class MandatoService {
             throw new CarteraInvalida("no_es_agencia",
                     "Esa organizacion no esta registrada como agencia de cobranza", 403);
         }
-        Organization acreedor = buscarAcreedor(pedido.acreedorRut());
+        Organization acreedor = buscarORegistrarAcreedor(pedido);
         if (acreedor.getId().equals(agencia.getId())) {
             throw new CarteraInvalida("mandato_invalido", "Una agencia no puede tener mandato sobre si misma");
         }
@@ -119,12 +123,41 @@ public class MandatoService {
     }
 
     private Organization buscarAcreedor(String crudo) {
+        String rut = rutDelAcreedor(crudo);
+        return organizations.findByRut(rut).orElseThrow(() -> new CarteraInvalida(
+                "acreedor_desconocido", "El acreedor " + rut + " no esta registrado", 404));
+    }
+
+    /**
+     * El acreedor del mandato, registrado si es nuevo. Uno que ya existe no se
+     * toca: sus nombres los fijo quien lo registro primero, y un mandato de otra
+     * agencia no los puede cambiar.
+     */
+    private Organization buscarORegistrarAcreedor(MandatoRequest pedido) {
+        String rut = rutDelAcreedor(pedido.acreedorRut());
+        return organizations.findByRut(rut).orElseGet(() -> {
+            String razonSocial = texto(pedido.razonSocial(), rut, 160);
+            Organization nueva = new Organization();
+            nueva.setRut(rut);
+            nueva.setLegalName(razonSocial);
+            nueva.setTradeName(texto(pedido.nombreFantasia(), razonSocial, 120));
+            nueva.setKind(Organization.Kind.creditor);
+            return organizations.save(nueva);
+        });
+    }
+
+    private static String rutDelAcreedor(String crudo) {
         String rut = Rut.normalizar(crudo);
         if (!Rut.esValido(rut)) {
             throw new CarteraInvalida("acreedor_invalido", "El RUT del acreedor no es valido");
         }
-        return organizations.findByRut(rut).orElseThrow(() -> new CarteraInvalida(
-                "acreedor_desconocido", "El acreedor " + rut + " no esta registrado", 404));
+        return rut;
+    }
+
+    /** El texto recortado a lo que cabe en la columna, o el valor por omision si viene vacio. */
+    private static String texto(String valor, String porOmision, int largo) {
+        String limpio = valor == null || valor.isBlank() ? porOmision : valor.strip();
+        return limpio.length() > largo ? limpio.substring(0, largo) : limpio;
     }
 
     private static boolean presente(JsonNode nodo) {

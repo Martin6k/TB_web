@@ -75,7 +75,7 @@ class DebtControllerTest {
         return new DebtSummaryResponse(3L, "CTR-2024-007", "Patrimonio Inmuebles", "76418902-7",
                 "Comercial Nandu SpA", "76991245-2", "Arriendo local comercial", Debt.Currency.UF,
                 new BigDecimal("115.50"), new BigDecimal("115.50"), BigDecimal.ZERO, estado,
-                Instant.parse("2026-09-24T12:00:00Z"), 0, 1, false, 0);
+                Instant.parse("2026-09-24T12:00:00Z"), 0, 1, false, 0, null);
     }
 
     @Test

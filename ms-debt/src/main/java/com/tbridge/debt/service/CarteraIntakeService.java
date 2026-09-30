@@ -29,6 +29,7 @@ import com.tbridge.debt.repository.InstallmentRepository;
 import com.tbridge.debt.repository.MandateRepository;
 import com.tbridge.debt.repository.OrganizationRepository;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -65,10 +66,13 @@ import java.util.TreeMap;
  *       se rechaza: un numero de lote no se reutiliza.</li>
  * </ol>
  *
- * <p><b>Solo deudores morosos.</b> Es el alcance de DataBridge: una deuda entra
- * a cobranza cuando tiene al menos {@code app.cartera.min-meses-impagos}
- * meses impagos (dos, por omision). Con menos todavia no es mora, y se rechaza
- * sola con el codigo {@code bajo_umbral_mora}.
+ * <p><b>Solo deudores morosos, y los detecta DataBridge.</b> El acreedor entrega
+ * a todos sus clientes con contrato, y el que esta al dia viene sin cargos
+ * (resultado {@code al_dia}, sin guardar nada). Una deuda entra a cobranza
+ * cuando tiene al menos {@code app.cartera.min-meses-impagos} meses impagos
+ * (dos, por omision). Con menos todavia no es mora, y se rechaza sola con el
+ * codigo {@code bajo_umbral_mora}. La que entra le avisa al deudor
+ * ({@link InvitacionService}).
  *
  * <p><b>Lo que se pago por DataBridge manda.</b> Una deuda en convenio que
  * vuelve en la cartera del mes siguiente conserva su convenio, y una pagada
@@ -91,6 +95,7 @@ public class CarteraIntakeService {
     private final DebtEventRepository events;
     private final ObjectMapper json;
     private final EventosService eventos;
+    private final ApplicationEventPublisher avisos;
     private final int minMesesImpagos;
 
     public CarteraIntakeService(
@@ -105,6 +110,7 @@ public class CarteraIntakeService {
             DebtEventRepository events,
             ObjectMapper json,
             EventosService eventos,
+            ApplicationEventPublisher avisos,
             @Value("${app.cartera.min-meses-impagos:2}") int minMesesImpagos
     ) {
         if (minMesesImpagos < 1) {
@@ -121,6 +127,7 @@ public class CarteraIntakeService {
         this.events = events;
         this.json = json;
         this.eventos = eventos;
+        this.avisos = avisos;
         this.minMesesImpagos = minMesesImpagos;
     }
 
@@ -292,7 +299,32 @@ public class CarteraIntakeService {
             return rechazo(idDeuda, error("accion", "accion_invalida",
                     "La accion va como registrar o retirar"));
         }
+        if (alDia(deuda)) {
+            return alDia(idDeuda, existente, batch);
+        }
         return registrar(deuda, idDeuda, acreedor, batch, campana, corte, mandato, existente);
+    }
+
+    /**
+     * Un cliente al dia: el acreedor lo informa con {@code cargos: []}.
+     *
+     * <p>El acreedor entrega a todos sus clientes con contrato, deban o no, y el
+     * que detecta al moroso es DataBridge. Al que no debe nada no se le guarda
+     * ni un dato: no hay nada que cobrarle. Si tenia una deuda en gestion, le
+     * pago al acreedor por fuera, y se cierra como un retiro.
+     */
+    private ResultadoDeuda alDia(String idDeuda, Debt existente, Batch batch) {
+        if (existente != null
+                && (existente.getStatus() == Debt.Status.open || existente.getStatus() == Debt.Status.repacted)) {
+            cerrar(existente, "pago_directo", batch);
+            return ResultadoDeuda.retirada(idDeuda);
+        }
+        return ResultadoDeuda.alDia(idDeuda);
+    }
+
+    private static boolean alDia(JsonNode deuda) {
+        JsonNode cargos = deuda.get("cargos");
+        return cargos != null && cargos.isArray() && cargos.isEmpty();
     }
 
     /**
@@ -340,6 +372,11 @@ public class CarteraIntakeService {
             return rechazo(idDeuda, error("id_externo", "deuda_no_encontrada",
                     "No hay ninguna deuda con ese id para retirar"));
         }
+        cerrar(existente, motivo, batch);
+        return ResultadoDeuda.retirada(idDeuda);
+    }
+
+    private void cerrar(Debt existente, String motivo, Batch batch) {
         existente.setStatus(Debt.Status.withdrawn);
         existente.setWithdrawnReason(motivo);
         existente.setLastBatch(batch);
@@ -356,7 +393,6 @@ public class CarteraIntakeService {
                 .conReferencia(motivo));
         eventos.publicar(existente, EventosService.DEUDA_RETIRADA,
                 new DeudaRetiradaDatos(existente.getExternalId(), motivo), Instant.now());
-        return ResultadoDeuda.retirada(idDeuda);
     }
 
     private ResultadoDeuda registrar(JsonNode deuda, String idDeuda, Organization acreedor,
@@ -472,13 +508,20 @@ public class CarteraIntakeService {
         if (nueva) {
             registro.setFirstBatch(batch);
         }
-        if (registro.getStatus() == Debt.Status.withdrawn || registro.getStatus() == Debt.Status.paid) {
+        boolean reabierta = registro.getStatus() == Debt.Status.withdrawn
+                || registro.getStatus() == Debt.Status.paid;
+        if (reabierta) {
             //  El acreedor la devuelve a gestion, o el deudor se volvio a
             //  atrasar: vuelve a estar abierta.
             registro.setWithdrawnReason(null);
             registro.setStatus(Debt.Status.open);
         }
         debts.save(registro);
+        if (nueva || reabierta) {
+            //  Entra (o vuelve) a cobranza: al deudor le llega su codigo de
+            //  acceso despues del commit del lote (InvitacionService).
+            avisos.publishEvent(new InvitacionService.DeudaEnCobranza(registro.getId()));
+        }
 
         if (!sinCambios) {
             reemplazarCargos(registro, cargos, total);

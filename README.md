@@ -58,8 +58,20 @@ como una entrada nueva, con el mismo mínimo de dos meses. Y la que pasa los 120
 la devuelve al acreedor y DataBridge deja de cobrarla (`fuera_de_mandato`). El detalle está en las
 [reglas de la cartera](docs/integracion/README.md#64-reglas-de-validación).
 
+**Llegan todos los clientes, deban o no.** El acreedor entrega cada mes a todos sus clientes con
+contrato, y DataBridge detecta al moroso. El que está al día viene con `cargos: []`:
+
+- si es nuevo, el resultado es `al_dia` y no se guarda nada;
+- si estaba en cobranza, la deuda se cierra como retirada con motivo `pago_directo`, porque pagó
+  directo al acreedor.
+
+**La invitación sale sola.** Cuando una deuda entra, o se reabre, DataBridge le manda al deudor su
+código por correo, sin monto ni enlace. Si el envío falla, la cartera entra igual, y desde el
+portal se reenvía.
+
 Del otro lado, la empresa que gestiona la cartera la ve al día, carga deudas nuevas por API o
-arrastrando un CSV, le envía el código al deudor y mira en un panel cuánto se ha recuperado.
+arrastrando un CSV, ve cuándo se invitó a cada deudor, le **reenvía el código** si lo perdió y
+mira en un panel cuánto se ha recuperado.
 Revisa los pagos que entraron, filtrados por medio de pago; sigue los **convenios en riesgo**,
 los que tienen una cuota vencida; exporta la cartera a Excel, y emite y revoca sus propias
 claves de API.
@@ -152,7 +164,7 @@ ejemplo, así que los tres sistemas cuentan lo mismo:
 | 17.893.456-2 | Ignacio Tapia Rojas | En convenio, con la primera cuota vencida: es el *convenio en riesgo* |
 | 19.230.418-0 | Carolina Muñoz Vera | Pagó todo de una vez, con Khipu |
 | 18.642.975-3 | Daniela Cáceres Flores | Pagó sus tres cuotas juntas |
-| 15.227.640-0 | Tomás Fuentes Leiva | Pagó en la oficina de Patrimonio, que retiró la deuda |
+| 15.227.640-0 | Tomás Fuentes Leiva | Pagó en la oficina de Patrimonio: la cartera siguiente lo trajo al día y la deuda se cerró |
 
 Para conseguir un código:
 
@@ -345,6 +357,7 @@ Tres formas, y cada una está donde está por una razón:
 
 ```
 Contrato v1, de sistema a sistema (con clave de API):
+  APOFYX ── GET /api/v1/cuenta ───────────────────────────────────────────► ms-debt
   APOFYX ── POST /api/v1/carteras, /mandatos, /campanas, /suscripciones ──► ms-debt
   ms-debt ── eventos firmados (pago.confirmado, deuda.saldada, ...) ──────► APOFYX
 
@@ -352,6 +365,12 @@ Entre servicios (clave interna, no expuesto por el gateway):
   ms-payments ── /internal/events/pago-confirmado ──► ms-debt
   ms-debt ───── /internal/codigos ──────────────────► ms-auth   (el código y el recordatorio de cuota)
 ```
+
+**Nada de esto se configura a mano.** La empresa emite la clave de su agencia en *Claves de API*.
+La agencia la pega en su panel, y al conectarse comprueba la clave con `GET /api/v1/cuenta` y se
+suscribe a los avisos. Un acreedor que DataBridge no conoce **lo registra el mandato** de su
+agencia, que trae su RUT, su razón social y su nombre. Solo la agencia, APOFYX, existe desde el
+arranque.
 
 El contrato completo, con sus ejemplos y su esquema JSON, está en
 [`docs/integracion/`](docs/integracion/README.md).
@@ -623,7 +642,7 @@ se corren con Maven.
 | `XAI_API_KEY` | vacía | El LLM del asistente. Sin ella, responde con reglas |
 | `MIN_MESES_IMPAGOS` | `2` | El alcance: desde cuántos meses impagos entra una deuda a cobranza. Con menos se rechaza (`bajo_umbral_mora`) |
 | `RECORDATORIO_DIAS_ANTES` | `3` | Cuántos días antes de cada cuota le llega al deudor el recordatorio. Se revisa cada mañana a las 9:00 (`RECORDATORIO_CRON`) y nunca se repite para la misma cuota |
-| `DEMO_DATOS` | `true` | Carga al arrancar la cartera de ejemplo ([§3](#para-entrar-como-deudor)). Solo agrega el deudor que falte: una base con datos propios no pierde nada. Con `false` quedan registradas igual las dos organizaciones de la cadena, Patrimonio y APOFYX |
+| `DEMO_DATOS` | `true` | Carga al arrancar la cartera de ejemplo ([§3](#para-entrar-como-deudor)). Solo agrega el deudor que falte: una base con datos propios no pierde nada. Con `false` queda registrada igual la agencia, APOFYX; cada acreedor llega con el mandato de su agencia |
 | `RATE_AUTH_CAPACITY`, `RATE_GLOBAL_CAPACITY` | `10` / `120` | Peticiones por minuto |
 | `EVENTS_RABBIT` | `true` en Docker, `false` con Maven | Si el aviso de pago va por RabbitMQ o por HTTP |
 | `SWAGGER_ENABLED` | `true` | Apagar la documentación, por ejemplo en producción |
@@ -647,12 +666,12 @@ base de datos**, así que corren en segundos en cualquier equipo.
 | Tipo | Qué cubre | Dónde |
 | --- | --- | --- |
 | **Unitarias** (JUnit 5 + Mockito) | Las reglas de cada servicio con los repositorios simulados (`@Mock`, `@InjectMocks`): que cada quien vea solo lo suyo, que el monto del cobro salga de ms-debt y no del navegador, que un pago avisado dos veces se abone una, que repactar anule las cuotas en vez de borrarlas,
-que las cuotas se paguen en orden, que solo entren deudores morosos, que un convenio sobreviva a la cartera del mes siguiente y que una deuda pagada se reabra solo con cargos nuevos, la sesión revocable (rotación, robo, dos pestañas), el código de acceso, la UF, la firma de los eventos, el recordatorio (uno por cuota, sin monto ni enlace) y qué cuotas cubrió cada pago. Una prueba fija byte a byte el JSON de un evento firmado: si cambiara, APOFYX lo rechazaría | `*/src/test/java/.../service/` |
-| **De integración de la capa web** (`@WebMvcTest` + MockMvc) | Cada controlador con su seguridad, su validación y su JSON de verdad, y los servicios simulados (`@MockitoBean`): `401` sin sesión, `403` con la deuda de otro, `400` con datos malos, la forma de cada respuesta, los `_links` de HATEOAS según quién mira y con la dirección pública, la cookie de la sesión, y los nombres del contrato v1 intactos | `*/src/test/java/.../controller/` |
+que las cuotas se paguen en orden, que solo entren deudores morosos, que un cliente al día no se cobre y cierre lo que estaba en cobranza, que el mandato registre al acreedor que no existía, que la invitación salga una vez y que su fallo no rompa la ingesta, que un convenio sobreviva a la cartera del mes siguiente y que una deuda pagada se reabra solo con cargos nuevos, la sesión revocable (rotación, robo, dos pestañas), el código de acceso, la UF, la firma de los eventos, el recordatorio (uno por cuota, sin monto ni enlace) y qué cuotas cubrió cada pago. Una prueba fija byte a byte el JSON de un evento firmado: si cambiara, APOFYX lo rechazaría | `*/src/test/java/.../service/` |
+| **De integración de la capa web** (`@WebMvcTest` + MockMvc) | Cada controlador con su seguridad, su validación y su JSON de verdad, y los servicios simulados (`@MockitoBean`): `401` sin sesión, `403` con la deuda de otro, `400` con datos malos, la forma de cada respuesta, los `_links` de HATEOAS según quién mira y con la dirección pública, la cookie de la sesión, los nombres del contrato v1 intactos, y lo que Swagger publica del contrato: la cartera en JSON y en CSV en una sola operación, y las listas de la campaña con su tipo | `*/src/test/java/.../controller/` |
 | **De seguridad** | En cada push, **CodeQL** (análisis estático de Java, JavaScript y Python), una auditoría de dependencias que rompe el build ante una vulnerabilidad alta, y Dependabot (también para las imágenes base de Docker). Con tráfico real: los dos frenos contra fuerza bruta y que una IP inventada no da un cupo nuevo | `.github/workflows/`, [`rendimiento/limite.js`](rendimiento/limite.js) |
 | **De rendimiento** (k6) | Cómo lo siente una persona (100 usuarios, p95 de 7 a 12 ms según el día) y dónde está el techo (unas 1.800 peticiones por segundo). La prueba de estrés encontró que nginx se quedaba sin puertos a las 500 por segundo; ya está arreglado | [`rendimiento/`](rendimiento/README.md) |
 
-**204 pruebas en Java y 12 en Python.** Corren solas en **GitHub Actions** con cada push; las de
+**224 pruebas en Java y 12 en Python.** Corren solas en **GitHub Actions** con cada push; las de
 rendimiento necesitan el sistema arriba y se corren a mano.
 
 ---
@@ -669,8 +688,9 @@ que la deuda, y al mismo tiempo el deudor que quiere pagar se topa con un horari
    pagar, y una base de contraseñas más que se puede filtrar.
 2. **Tres empresas, un contrato.** La inmobiliaria, la agencia de cobranza y la plataforma de
    pago son sistemas independientes que se hablan por un contrato versionado, no por una base
-   compartida. Sumar un cliente nuevo es escribir su adaptador; nadie toca el código de los
-   otros. Y si uno se cae, los demás siguen funcionando — probado, no supuesto.
+   compartida. Sumar una empresa nueva no toca código: se registra en su agencia, entrega su
+   cartera por el mismo contrato, y el mandato la presenta a DataBridge. Y si un sistema se cae,
+   los demás siguen funcionando — probado, no supuesto.
 3. **La deuda vuelve.** Lo difícil de la cobranza tercerizada no es cobrar: es que el acreedor se
    entere. Acá el pago viaja de vuelta, firmado, hasta dejar el contrato de arriendo en $0 sin
    que nadie escriba un correo. Eso es lo que evita que le sigan cobrando a alguien que ya pagó.
@@ -689,8 +709,9 @@ detalle de lo que debe y repactar sin interés. A la agencia, una cartera que se
    misma ingesta: mismas validaciones, aceptación parcial e idempotencia.
 2. **La empresa entra.** En *Soy de una empresa*, `camila.reyes@apofyx.cl` pide su enlace; llega al
    buzón de prueba. Ve la cartera que APOFYX entregó, aunque el acreedor sea Patrimonio.
-3. **Le envía el código al deudor.** El botón *Enviar código* lo manda al correo del deudor. La
-   pantalla no lo muestra: quien lo viera podría entrar en su lugar.
+3. **El deudor recibe su código solo.** Al entrar la deuda, la invitación sale a su correo, y la
+   cartera muestra *Invitado el …*. Si la perdió, el botón *Reenviar código* le manda otra. La
+   pantalla no muestra el código: quien lo viera podría entrar en su lugar.
 4. **El deudor entra** con su RUT y ese código, simula un plan, lo acepta y paga una o varias
    cuotas, en orden. La barra de su deuda avanza: pendiente → en convenio → pago conciliado.
 5. **El pago vuelve por la cadena**: ms-payments avisa a ms-debt, ms-debt emite los eventos, y
@@ -734,9 +755,10 @@ escenario no prueban resultados comerciales con deudores reales.
 | `common` | 18 pruebas Java aprobadas |
 | `gateway` | 11 pruebas Java aprobadas |
 | `ms-auth` | 40 pruebas Java aprobadas |
-| `ms-debt` | 104 pruebas Java aprobadas |
+| `ms-debt` | 124 pruebas Java aprobadas |
 | `ms-payments` | 31 pruebas Java aprobadas |
-| Total Java | **204**, sin fallos, errores ni omisiones; Maven `BUILD SUCCESS` |
+| Total Java | **224**, sin fallos, errores ni omisiones; Maven `BUILD SUCCESS` |
+| Cadena completa (`cadena.mjs --probar`) | 14 de 14 comprobaciones, con imágenes reconstruidas: el cliente moroso nuevo de Patrimonio llega, DataBridge registra al acreedor, invita al deudor, y el pago vuelve hasta el contrato |
 | `ms-ai` | **12 pruebas Python aprobadas** del motor local y formato de deuda |
 | Frontend | Build correcto; 754 módulos; salida de revisión en carpeta temporal |
 | Compose con perfil `app` | Configuración válida, 9 servicios |
@@ -779,7 +801,7 @@ Tampoco se consultó el último resultado de GitHub Actions o CodeQL.
 | Prioridad | Pendiente | Evidencia o criterio de cierre |
 | --- | --- | --- |
 | Alta para la entrega | Mantener explícita la simulación de Webpay, Mercado Pago y Khipu | No presentar el checkout de demo como integración de un proveedor real |
-| Alta para validar la versión final | Ejecutar la cadena separada con imágenes actuales | Guardar resultado de cartera, pago, convenio posterior, reapertura y retiro |
+| Alta para validar la versión final | Recorrer a mano la [prueba guiada](../PRUEBA-GUIADA.md) | La versión automática ya pasa; falta el recorrido con convenio, reapertura y retiro en meses siguientes |
 | Media | Probar persistencia y migraciones con MySQL además de los mocks | Arranque desde base vacía y actualización de una base previa sin pérdida |
 | Media | Actualizar `docs/plan-kanban.md` | Docker ya existe; NLP está en `ms-ai/app/services/nlp.py`; reconciliar fechas y pendientes |
 | Media | Resolver tareas periódicas y límites antes de replicar | Coordinar despachadores; el mapa de límites del gateway es local y no elimina entradas antiguas |

@@ -28,6 +28,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
+import org.springframework.context.ApplicationEventPublisher;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -40,6 +41,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -63,6 +65,7 @@ class CarteraIntakeServiceTest {
     @Mock private InstallmentRepository installments;
     @Mock private DebtEventRepository events;
     @Mock private EventosService eventos;
+    @Mock private ApplicationEventPublisher avisos;
 
     private final ObjectMapper json = new ObjectMapper();
     private CarteraIntakeService servicio;
@@ -71,7 +74,7 @@ class CarteraIntakeServiceTest {
     @BeforeEach
     void preparar() {
         servicio = new CarteraIntakeService(organizations, mandates, campaigns, batches, debtors, debts,
-                charges, installments, events, json, eventos, 2);
+                charges, installments, events, json, eventos, avisos, 2);
 
         //  Patrimonio entrega lo suyo: sin agencia, no hace falta mandato.
         patrimonio = new Organization();
@@ -338,6 +341,84 @@ class CarteraIntakeServiceTest {
     @Test
     void un_umbral_menor_que_uno_no_deja_arrancar_el_servicio() {
         assertThrows(IllegalStateException.class, () -> new CarteraIntakeService(organizations, mandates,
-                campaigns, batches, debtors, debts, charges, installments, events, json, eventos, 0));
+                campaigns, batches, debtors, debts, charges, installments, events, json, eventos, avisos, 0));
+    }
+
+    // ------------------------------------------------------------------
+    //  Todos los clientes con contrato: el que esta al dia viene sin cargos
+    // ------------------------------------------------------------------
+
+    @Test
+    void un_cliente_al_dia_se_acepta_sin_guardar_nada() throws Exception {
+        CarteraResponse respuesta = servicio.recibir(patrimonio, cartera(), Batch.Source.api);
+
+        ResultadoDeuda resultado = respuesta.resultados().getFirst();
+        assertEquals("al_dia", resultado.resultado());
+        assertEquals(1, respuesta.aceptadas());
+        //  De quien no debe nada no se guarda ni un dato.
+        verify(debtors, never()).save(any());
+        verify(debts, never()).save(any());
+        verify(avisos, never()).publishEvent(any());
+    }
+
+    @Test
+    void al_dia_con_una_deuda_en_gestion_la_cierra_como_pago_directo() throws Exception {
+        Debt deuda = existente(Debt.Status.open);
+        Installment pendiente = cuota(deuda, 1, LocalDate.of(2026, 9, 5), 820000, null);
+        when(installments.findByDebtAndStatus(deuda, Installment.Status.pending)).thenReturn(List.of(pendiente));
+
+        ResultadoDeuda resultado = recibir(cartera());
+
+        assertEquals("retirada", resultado.resultado());
+        assertEquals(Debt.Status.withdrawn, deuda.getStatus());
+        verify(events).save(argThat(evento -> "pago_directo".equals(evento.getReference())));
+        assertEquals(Installment.Status.void_, pendiente.getStatus());
+    }
+
+    @Test
+    void al_dia_con_una_deuda_ya_pagada_no_cambia_nada() throws Exception {
+        Debt deuda = existente(Debt.Status.paid);
+
+        ResultadoDeuda resultado = recibir(cartera());
+
+        assertEquals("al_dia", resultado.resultado());
+        assertEquals(Debt.Status.paid, deuda.getStatus());
+        verify(debts, never()).save(any());
+    }
+
+    // ------------------------------------------------------------------
+    //  La invitacion: al deudor le llega su codigo cuando la deuda entra
+    // ------------------------------------------------------------------
+
+    @Test
+    void una_deuda_que_entra_invita_al_deudor() throws Exception {
+        recibir(cartera(
+                cargo("Arriendo agosto", "2026-08", "2026-08-05"),
+                cargo("Arriendo septiembre", "2026-09", "2026-09-05")));
+
+        verify(avisos).publishEvent(any(InvitacionService.DeudaEnCobranza.class));
+    }
+
+    @Test
+    void una_deuda_que_ya_estaba_en_gestion_no_vuelve_a_invitar() throws Exception {
+        existente(Debt.Status.open);
+
+        recibir(cartera(
+                cargo("Arriendo agosto", "2026-08", "2026-08-05"),
+                cargo("Arriendo septiembre", "2026-09", "2026-09-05")));
+
+        verify(avisos, never()).publishEvent(any());
+    }
+
+    @Test
+    void una_deuda_pagada_que_vuelve_a_cobranza_invita_de_nuevo() throws Exception {
+        existente(Debt.Status.paid);
+
+        ResultadoDeuda resultado = recibir(carteraAl("2026-11-18",
+                cargo("Arriendo octubre", "2026-10", "2026-10-05"),
+                cargo("Arriendo noviembre", "2026-11", "2026-11-05")));
+
+        assertEquals("actualizada", resultado.resultado());
+        verify(avisos).publishEvent(any(InvitacionService.DeudaEnCobranza.class));
     }
 }

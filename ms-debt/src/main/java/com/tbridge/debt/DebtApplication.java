@@ -3,6 +3,7 @@ package com.tbridge.debt;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration;
+import org.springframework.scheduling.annotation.EnableAsync;
 import org.springframework.scheduling.annotation.EnableScheduling;
 
 /**
@@ -22,6 +23,8 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 )
 //  El despachador de eventos y el avance diario de las campanas.
 @EnableScheduling
+//  La invitacion al deudor sale en otro hilo: no hace esperar a quien entrega la cartera.
+@EnableAsync
 public class DebtApplication {
 
     public static void main(String[] args) {

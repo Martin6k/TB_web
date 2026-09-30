@@ -17,8 +17,14 @@ public record CampanaRequest(
         @Schema(description = "Sin indicar, el id externo", example = "Arriendos septiembre", nullable = true) String nombre,
         @Schema(description = "Sin indicar, hoy", example = "2026-09-01", nullable = true) String inicio,
         @Schema(nullable = true, example = "2026-12-31") String fin,
-        @Schema(description = "whatsapp y/o correo", example = "[\"whatsapp\",\"correo\"]", nullable = true) JsonNode canales,
+        //  Se guardan tal como llegan, como texto JSON; `implementation` le dice a
+        //  Swagger que son listas, porque JsonNode se publicaria como un objeto vacio.
+        @Schema(implementation = String[].class, nullable = true, description = "whatsapp y/o correo",
+                example = "[\"whatsapp\",\"correo\"]")
+        JsonNode canales,
         @Schema(description = "Cuantas veces se contacta. Sin indicar, 3", example = "3", nullable = true) Integer intentos,
-        @Schema(description = "Dias entre contactos", example = "[0,3,7]", nullable = true) JsonNode cadenciaDias
+        @Schema(implementation = Integer[].class, nullable = true, description = "Dias entre contactos",
+                example = "[0,3,7]")
+        JsonNode cadenciaDias
 ) {
 }

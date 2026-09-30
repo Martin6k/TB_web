@@ -27,6 +27,7 @@ import java.util.List;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -95,5 +96,23 @@ class IntegracionControllerTest {
                         .contentType(MediaType.APPLICATION_JSON).content(CARTERA))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.error.codigo").value("lote_id_reutilizado"));
+    }
+
+    @Test
+    void la_cuenta_dice_quien_es_el_dueno_de_la_clave() throws Exception {
+        Organization apofyx = new Organization();
+        apofyx.setRut("77305118-6");
+        apofyx.setLegalName("APOFYX SpA");
+        apofyx.setTradeName("APOFYX");
+        apofyx.setKind(Organization.Kind.agency);
+        when(claves.autenticar("Bearer tbk_prueba")).thenReturn(apofyx);
+
+        mvc.perform(get("/api/v1/cuenta").header("Authorization", "Bearer tbk_prueba"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.rut").value("77305118-6"))
+                .andExpect(jsonPath("$.razon_social").value("APOFYX SpA"))
+                .andExpect(jsonPath("$.nombre").value("APOFYX"))
+                .andExpect(jsonPath("$.tipo").value("agencia"))
+                .andExpect(jsonPath("$.receptor.nombre").value("DataBridge"));
     }
 }

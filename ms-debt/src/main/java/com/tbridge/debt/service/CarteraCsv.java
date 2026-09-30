@@ -8,9 +8,11 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * La variante CSV de la Cartera v1 (contrato, seccion 6.6), convertida al JSON
@@ -31,6 +33,10 @@ public final class CarteraCsv {
     static final List<String> COLUMNAS = List.of(
             "deuda_id", "accion", "motivo_retiro", "deudor_rut", "deudor_tipo", "deudor_nombre",
             "deudor_correo", "deudor_telefono", "moneda", "concepto", "referencias",
+            "cargo_concepto", "cargo_periodo", "cargo_monto", "cargo_vencimiento");
+
+    /** Las columnas de un cargo. Una fila con las cuatro vacias es un cliente al dia. */
+    private static final List<String> CARGO = List.of(
             "cargo_concepto", "cargo_periodo", "cargo_monto", "cargo_vencimiento");
 
     /** Las columnas de la deuda: tienen que repetirse igual en cada fila de sus cargos. */
@@ -62,6 +68,7 @@ public final class CarteraCsv {
         Map<String, ObjectNode> deudas = new LinkedHashMap<>();
         Map<String, Integer> primeraFila = new LinkedHashMap<>();
         Map<String, List<String>> columnasDe = new LinkedHashMap<>();
+        Set<String> alDia = new HashSet<>();
 
         for (int n = 1; n < filas.size(); n++) {
             List<String> fila = filas.get(n);
@@ -90,12 +97,25 @@ public final class CarteraCsv {
             for (String columna : DE_LA_DEUDA) {
                 suyas.add(celda(fila, indice, columna));
             }
+            boolean conCargo = CARGO.stream().anyMatch(columna -> !celda(fila, indice, columna).isEmpty());
             ObjectNode deuda = deudas.get(id);
             if (deuda == null) {
                 deuda = nuevaDeuda(id, fila, indice);
                 deudas.put(id, deuda);
                 primeraFila.put(id, numero);
                 columnasDe.put(id, suyas);
+                if (!conCargo) {
+                    //  Un cliente sin cargos esta al dia: va en una sola fila, y
+                    //  la deuda sale con cargos: [].
+                    alDia.add(id);
+                    continue;
+                }
+            } else if (alDia.contains(id)) {
+                throw invalido("Fila " + numero + ": la deuda " + id + " esta al dia en la fila "
+                        + primeraFila.get(id) + " (sin cargos) y no puede traer cargos en otra");
+            } else if (!conCargo) {
+                throw invalido("Fila " + numero + ": la deuda " + id + " no trae el cargo. Un cliente al dia "
+                        + "va en una sola fila, sin columnas de cargo");
             } else if (!deuda.has("cargos")) {
                 throw invalido("Fila " + numero + ": la deuda " + id + " se retira en la fila "
                         + primeraFila.get(id) + " y no puede traer cargos");

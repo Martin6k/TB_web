@@ -57,10 +57,11 @@ import java.util.List;
  * <p>Al arrancar se agrega el deudor que falte, sin tocar los que ya estan: una
  * base con datos propios no pierde nada.
  *
- * <p>Las dos organizaciones de la cadena, Patrimonio y APOFYX, se registran
- * siempre: sin ellas nadie podria entregar cartera, ni se le podria emitir una
- * clave a la agencia. Con {@code app.demo.datos=false} queda fuera solo la
- * historia.
+ * <p>La agencia, APOFYX, se registra siempre: es la empresa que opera la
+ * plataforma, y sin ella no habria a quien emitirle la clave con que entrega
+ * cartera. Los acreedores no: cada uno llega con el mandato de su agencia, que
+ * lo registra la primera vez. Patrimonio solo se crea aca junto con la
+ * historia de la demo, y con {@code app.demo.datos=false} queda fuera todo eso.
  */
 @Component
 public class DataSeeder implements CommandLineRunner {
@@ -110,12 +111,12 @@ public class DataSeeder implements CommandLineRunner {
     @Override
     @Transactional
     public void run(String... args) {
-        patrimonio = organizacion("76418902-7", "Patrimonio Inmuebles SpA", "Patrimonio Inmuebles",
-                Organization.Kind.creditor);
         apofyx = organizacion("77305118-6", "APOFYX SpA", "APOFYX", Organization.Kind.agency);
         if (!historia) {
             return;
         }
+        patrimonio = organizacion("76418902-7", "Patrimonio Inmuebles SpA", "Patrimonio Inmuebles",
+                Organization.Kind.creditor);
         agosto = lote("APX-2026-08-19-003", LocalDate.of(2026, 8, 18), cl("2026-08-19T10:12"), 8, 6);
         septiembre = lote("APX-2026-09-19-004", LocalDate.of(2026, 9, 18), cl("2026-09-19T10:05"), 8, 7);
 

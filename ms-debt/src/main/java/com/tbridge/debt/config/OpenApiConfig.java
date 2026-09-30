@@ -53,7 +53,9 @@ public class OpenApiConfig {
                                 .description("El `token` de la sesion del portal (ms-auth)."))
                         .addSecuritySchemes(CLAVE_API, new SecurityScheme()
                                 .type(SecurityScheme.Type.HTTP).scheme("bearer").bearerFormat("tbk_...")
-                                .description("La clave de API del emisor. Se emite con `POST /internal/claves`."))
+                                .description("""
+                                        La clave de API del emisor. La empresa la emite en el portal, en \
+                                        *Claves de API*, y se comprueba con `GET /api/v1/cuenta`."""))
                         .addSecuritySchemes(CLAVE_INTERNA, new SecurityScheme()
                                 .type(SecurityScheme.Type.APIKEY).in(SecurityScheme.In.HEADER).name("X-Internal-Key")
                                 .description("La clave que comparten los servicios (`INTERNAL_KEY`).")));
