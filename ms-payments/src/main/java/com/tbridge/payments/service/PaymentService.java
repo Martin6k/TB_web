@@ -3,6 +3,7 @@ package com.tbridge.payments.service;
 import com.tbridge.common.exception.ApiException;
 import com.tbridge.common.jwt.JwtPrincipal;
 import com.tbridge.payments.client.DebtClient;
+import com.tbridge.payments.client.WebpayClient;
 import com.tbridge.payments.dto.request.CheckoutRequest;
 import com.tbridge.payments.dto.request.WebhookRequest;
 import com.tbridge.payments.dto.response.HistoriaResponse;
@@ -52,7 +53,10 @@ public class PaymentService {
     private final WebhookVerifier verifier;
     private final DebtClient deudas;
     private final UfService uf;
+    private final WebpayClient webpay;
     private final String publicUrl;
+
+    public record WebpayCommitResult(PaymentResponse payment, boolean success, String message) {}
 
     public PaymentService(
             PaymentRepository payments,
@@ -61,6 +65,7 @@ public class PaymentService {
             WebhookVerifier verifier,
             DebtClient deudas,
             UfService uf,
+            WebpayClient webpay,
             @Value("${app.public-url}") String publicUrl
     ) {
         this.payments = payments;
@@ -69,6 +74,7 @@ public class PaymentService {
         this.verifier = verifier;
         this.deudas = deudas;
         this.uf = uf;
+        this.webpay = webpay;
         this.publicUrl = publicUrl.replaceAll("/$", "");
     }
 
@@ -113,7 +119,27 @@ public class PaymentService {
         payments.save(pago);
         eventos.save(PaymentEvent.de(pago.getId(), PaymentEvent.Type.created, PaymentEvent.Source.portal));
 
-        return PaymentResponse.from(pago).conEnlaceDePago(enlaceDePago(pago));
+        String checkoutUrl;
+        if (gateway == Payment.Gateway.webpay) {
+            // Integración real Transbank Webpay Plus (Ambiente TEST)
+            String buyOrder = "ORD" + pago.getId() + "T" + (System.currentTimeMillis() % 100000);
+            String sessionId = "SESS" + pago.getId();
+            String returnUrl = publicUrl + "/api/payments/webpay/return";
+            com.tbridge.payments.dto.gateway.WebpayCreateResponse webpayResp = webpay.createTransaction(
+                    buyOrder,
+                    sessionId,
+                    pago.getAmountClp(),
+                    returnUrl
+            );
+            pago.setGatewayTxnId(webpayResp.token());
+            payments.save(pago);
+            checkoutUrl = webpayResp.url() + "?token_ws=" + webpayResp.token();
+        } else {
+            // Placeholder / Simulación para Mercado Pago y Khipu
+            checkoutUrl = enlaceDePago(pago);
+        }
+
+        return PaymentResponse.from(pago).conEnlaceDePago(checkoutUrl);
     }
 
     private String enlaceDePago(Payment pago) {
@@ -127,6 +153,57 @@ public class PaymentService {
     private String firma(Payment pago) {
         return verifier.sign(String.valueOf(pago.getId()), pago.getAmount().toPlainString(),
                 String.valueOf(pago.getDebtId()));
+    }
+
+    /**
+     * Confirma una transacción que retorna desde Transbank Webpay Plus.
+     */
+    @Transactional
+    public WebpayCommitResult confirmWebpay(String tokenWs, String tbkToken) {
+        if (tokenWs == null || tokenWs.isBlank()) {
+            if (tbkToken != null && !tbkToken.isBlank()) {
+                payments.findByGatewayAndGatewayTxnId(Payment.Gateway.webpay, tbkToken)
+                        .ifPresent(p -> {
+                            if (p.getStatus() == Payment.Status.created) {
+                                p.setStatus(Payment.Status.failed);
+                                payments.save(p);
+                                eventos.save(PaymentEvent.de(p.getId(), PaymentEvent.Type.failed, PaymentEvent.Source.portal));
+                            }
+                        });
+            }
+            return new WebpayCommitResult(null, false, "Transacción cancelada o abortada en Webpay");
+        }
+
+        Payment pago = payments.findByGatewayAndGatewayTxnId(Payment.Gateway.webpay, tokenWs).orElse(null);
+        com.tbridge.payments.dto.gateway.WebpayCommitResponse commitResp = webpay.commitTransaction(tokenWs);
+
+        if (pago == null && commitResp.buyOrder() != null) {
+            try {
+                String bo = commitResp.buyOrder();
+                if (bo.startsWith("ORD")) {
+                    int tIdx = bo.indexOf('T');
+                    String idStr = tIdx > 3 ? bo.substring(3, tIdx) : bo.substring(3);
+                    pago = payments.findById(Long.parseLong(idStr)).orElse(null);
+                }
+            } catch (Exception ignored) {
+            }
+        }
+
+        if (pago == null) {
+            throw new ApiException(HttpStatus.NOT_FOUND, "Pago Webpay no encontrado para el token proporcionado");
+        }
+
+        if (commitResp.isAuthorized()) {
+            String authCode = commitResp.authorizationCode() != null ? commitResp.authorizationCode() : "1213";
+            String uniqueTxnId = "tbk-" + pago.getId() + "-" + authCode;
+            PaymentResponse resp = confirmar(pago, PaymentEvent.Source.portal, uniqueTxnId, true);
+            return new WebpayCommitResult(resp, true, "Pago aprobado");
+        } else {
+            pago.setStatus(Payment.Status.failed);
+            payments.save(pago);
+            eventos.save(PaymentEvent.de(pago.getId(), PaymentEvent.Type.failed, PaymentEvent.Source.portal));
+            return new WebpayCommitResult(PaymentResponse.from(pago), false, "Pago rechazado por Transbank");
+        }
     }
 
     // ------------------------------------------------------------------

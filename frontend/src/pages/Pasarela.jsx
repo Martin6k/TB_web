@@ -43,7 +43,7 @@ export default function Pasarela() {
       <div className="auth-card">
         <div className="card-cab" style={{ marginBottom: 4 }}>
           {pago ? <LogoPasarela id={pago.gateway} alto={24} /> : <span />}
-          <span className="badge badge-muted">Simulación</span>
+          <span className="badge badge-warn">Placeholder / Simulación</span>
         </div>
         {pago ? <span className="eyebrow">Pago con {nombreDePasarela(pago.gateway)}</span> : null}
         {error ? <div className="error" style={{ marginTop: 14 }}>{error}</div> : null}
@@ -55,7 +55,10 @@ export default function Pasarela() {
           </div>
         ) : pago ? (
           <>
-            <h2 style={{ marginTop: 10 }}>Confirmar pago</h2>
+            <h2 style={{ marginTop: 10 }}>Confirmar pago ({nombreDePasarela(pago.gateway)})</h2>
+            <p className="hint" style={{ marginTop: -4, marginBottom: 12 }}>
+              Pasarela en modo <b>placeholder</b> para pruebas locales. Al presionar <i>Pagar</i> se simula la aprobación y se concilia con tu deuda.
+            </p>
             <div className="total-pagar">
               <span>Monto</span>
               <b>{dinero(pago.amount, pago.currency)}</b>

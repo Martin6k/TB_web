@@ -11,6 +11,6 @@ __pycache__/
 *.pyc
 .venv/
 venv/
-
+api_transbank.md
 # Notas locales de commit: no se versionan.
 COMMIT.txt

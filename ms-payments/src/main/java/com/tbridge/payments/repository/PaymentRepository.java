@@ -18,4 +18,6 @@ public interface PaymentRepository extends JpaRepository<Payment, Long> {
      * columna por la que filtrar.
      */
     List<Payment> findByCreditorRutOrderByCreatedAtDesc(String creditorRut);
+
+    java.util.Optional<Payment> findByGatewayAndGatewayTxnId(Payment.Gateway gateway, String gatewayTxnId);
 }

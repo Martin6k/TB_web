@@ -29,8 +29,15 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.web.bind.annotation.RequestMethod;
+import org.springframework.web.servlet.view.RedirectView;
+import org.springframework.web.util.UriUtils;
+
+import java.nio.charset.StandardCharsets;
+
 /**
- * Los pagos del portal, y la pagina publica de la pasarela simulada.
+ * Los pagos del portal, la integracion de Webpay y la pagina publica de la pasarela simulada.
  */
 @RestController
 @RequestMapping("/api/payments")
@@ -39,10 +46,16 @@ public class PaymentController {
 
     private final PaymentService payments;
     private final PaymentModelAssembler enlaces;
+    private final String publicUrl;
 
-    public PaymentController(PaymentService payments, PaymentModelAssembler enlaces) {
+    public PaymentController(
+            PaymentService payments,
+            PaymentModelAssembler enlaces,
+            @Value("${app.public-url}") String publicUrl
+    ) {
         this.payments = payments;
         this.enlaces = enlaces;
+        this.publicUrl = publicUrl.replaceAll("/$", "");
     }
 
     @PostMapping("/checkout")
@@ -121,5 +134,63 @@ public class PaymentController {
     public PaymentResponse confirm(@PathVariable Long id,
                                    @Parameter(description = "La firma del enlace de pago") @RequestParam String sig) {
         return payments.confirmPublic(id, sig);
+    }
+
+    @RequestMapping(value = "/webpay/return", method = {RequestMethod.GET, RequestMethod.POST})
+    @Operation(summary = "Retorno desde Transbank Webpay",
+            description = "Punto al que Transbank redirige al usuario con token_ws o TBK_TOKEN tras completar o anular el pago.")
+    public org.springframework.http.ResponseEntity<String> webpayReturn(
+            @RequestParam(name = "token_ws", required = false) String tokenWs,
+            @RequestParam(name = "TBK_TOKEN", required = false) String tbkToken,
+            @RequestParam(name = "tbk_token", required = false) String tbkTokenLower) {
+        String token = tokenWs != null && !tokenWs.isBlank() ? tokenWs : null;
+        String aborted = tbkToken != null && !tbkToken.isBlank() ? tbkToken : tbkTokenLower;
+
+        String targetUrl;
+        try {
+            PaymentService.WebpayCommitResult result = payments.confirmWebpay(token, aborted);
+            if (result.success() && result.payment() != null) {
+                targetUrl = publicUrl + "/pasarela/webpay/resultado?status=approved&id="
+                        + result.payment().id() + "&debtId=" + result.payment().debtId()
+                        + "&amount=" + result.payment().amount() + "&currency=" + result.payment().currency();
+            } else {
+                Long debtId = result.payment() != null ? result.payment().debtId() : null;
+                targetUrl = publicUrl + "/pasarela/webpay/resultado?status=rejected"
+                        + (debtId != null ? "&debtId=" + debtId : "");
+            }
+        } catch (Exception e) {
+            targetUrl = publicUrl + "/pasarela/webpay/resultado?status=error&error="
+                    + UriUtils.encode(e.getMessage(), StandardCharsets.UTF_8);
+        }
+
+        String html = """
+                <!DOCTYPE html>
+                <html lang="es">
+                <head>
+                    <meta charset="UTF-8">
+                    <meta http-equiv="refresh" content="0;url=%s">
+                    <title>Redirigiendo...</title>
+                    <script>
+                        window.location.replace("%s");
+                    </script>
+                </head>
+                <body style="font-family: sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #f8fafc;">
+                    <div style="text-align: center;">
+                        <h2>Procesando pago Transbank...</h2>
+                        <p>Redirigiendo a tu comprobante. Si no eres redirigido, <a href="%s">haz clic aqu&iacute;</a>.</p>
+                    </div>
+                </body>
+                </html>
+                """.formatted(targetUrl, targetUrl, targetUrl);
+
+        return org.springframework.http.ResponseEntity.ok()
+                .contentType(org.springframework.http.MediaType.TEXT_HTML)
+                .body(html);
+    }
+
+    @PostMapping("/webpay/commit")
+    @Operation(summary = "Confirmar token Webpay manualmente via API")
+    public PaymentResponse webpayCommit(@RequestParam String token) {
+        return payments.confirmWebpay(token, null).payment();
     }
 }

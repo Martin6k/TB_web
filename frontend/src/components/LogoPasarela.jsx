@@ -14,9 +14,9 @@
  * en vez de cortarse.
  */
 export const PASARELAS = {
-  webpay: { nombre: "Webpay", detalle: "Débito o crédito", escala: 1, cabe: 31 },
-  mercadopago: { nombre: "Mercado Pago", detalle: "Saldo o tarjeta", escala: 1.9, cabe: 49 },
-  khipu: { nombre: "Khipu", detalle: "Transferencia bancaria", escala: 1, cabe: 44 },
+  webpay: { nombre: "Webpay Plus", detalle: "Transbank TEST (Débito o Crédito)", escala: 1, cabe: 31, real: true },
+  mercadopago: { nombre: "Mercado Pago", detalle: "Saldo o tarjeta (Placeholder)", escala: 1.9, cabe: 49, placeholder: true },
+  khipu: { nombre: "Khipu", detalle: "Transferencia bancaria (Placeholder)", escala: 1, cabe: 44, placeholder: true },
 };
 
 export const nombreDePasarela = (id) => PASARELAS[id]?.nombre || id || "Otro medio";

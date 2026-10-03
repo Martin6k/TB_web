@@ -90,7 +90,12 @@ export default function Pay() {
       const cuotas = enConvenio ? elegidas.map((c) => c.id) : null;
       const data = await abrirCobro(Number(id), cuotas, pasarela);
       setPago(data);
-      window.open(data.checkoutUrl, "_blank", "noopener,width=480,height=720");
+      // Intentar abrir en nueva pestaña/ventana
+      const popup = window.open(data.checkoutUrl, "_blank");
+      if (!popup || popup.closed || typeof popup.closed === "undefined") {
+        // Si el navegador bloquea la ventana emergente, redirigir en la misma pestaña
+        window.location.href = data.checkoutUrl;
+      }
     } catch (err) {
       setError(err.message);
     } finally {
@@ -241,13 +246,19 @@ export default function Pay() {
                 {busy ? <><span className="girando" /> Abriendo…</> : <>Pagar {dinero(monto, moneda)} <IconoFlecha size={16} /></>}
               </button>
               {pago ? (
-                <div className="esperando">
-                  <span className="girando" />
-                  Esperando la confirmación de la pasarela…{" "}
-                  <button type="button" className="link-btn"
-                          onClick={() => window.open(pago.checkoutUrl, "_blank", "noopener,width=480,height=720")}>
-                    Abrirla de nuevo
-                  </button>
+                <div style={{ marginTop: 14, display: "grid", gap: 10 }}>
+                  <a
+                    href={pago.checkoutUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="btn btn-primary btn-block"
+                  >
+                    Ir a pagar en {pasarela === "webpay" ? "Transbank Webpay" : "la Pasarela"} &rarr;
+                  </a>
+                  <div className="esperando" style={{ justifyContent: "center" }}>
+                    <span className="girando" />
+                    Esperando la confirmación de la pasarela…
+                  </div>
                 </div>
               ) : (
                 <p className="hint centro" style={{ display: "flex", gap: 6, justifyContent: "center", alignItems: "center" }}>

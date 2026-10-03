@@ -33,6 +33,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -54,13 +55,14 @@ class PaymentServiceTest {
     @Mock private DebtNotificationRepository avisos;
     @Mock private DebtClient deudas;
     @Mock private UfService uf;
+    @Mock private com.tbridge.payments.client.WebpayClient webpay;
 
     private final WebhookVerifier firmas = new WebhookVerifier("secreto-de-prueba");
     private PaymentService servicio;
 
     @BeforeEach
     void preparar() {
-        servicio = new PaymentService(payments, eventos, avisos, firmas, deudas, uf, "http://localhost:8080/");
+        servicio = new PaymentService(payments, eventos, avisos, firmas, deudas, uf, webpay, "http://localhost:8080/");
         when(payments.save(any())).thenAnswer(llamada -> {
             Payment pago = llamada.getArgument(0);
             if (pago.getId() == null) {
@@ -69,6 +71,8 @@ class PaymentServiceTest {
             return pago;
         });
         when(avisos.findByPaymentId(any())).thenReturn(Optional.empty());
+        when(webpay.createTransaction(any(), any(), anyLong(), any()))
+                .thenReturn(new com.tbridge.payments.dto.gateway.WebpayCreateResponse("tok_test", "https://webpay.test/init"));
     }
 
     private static DebtClient.DebtSnapshot deudaDe(String rut, String moneda, String monto) {
@@ -84,7 +88,11 @@ class PaymentServiceTest {
         assertEquals(new BigDecimal("410000"), pago.amount());
         assertEquals(410000L, pago.amountClp());
         assertEquals(Payment.Status.created, pago.status());
-        assertTrue(pago.checkoutUrl().startsWith("http://localhost:8080/pasarela/41?sig="));
+        assertTrue(pago.checkoutUrl().startsWith("https://webpay.test/init?token_ws=tok_test"));
+
+        // Placeholder gateway (Mercado Pago o Khipu) genera el enlace de pasarela simulada
+        PaymentResponse pagoMp = servicio.checkout(DEUDOR, new CheckoutRequest(3L, null, "mercadopago"));
+        assertTrue(pagoMp.checkoutUrl().startsWith("http://localhost:8080/pasarela/41?sig="));
     }
 
     @Test
@@ -207,5 +215,38 @@ class PaymentServiceTest {
         //  APOFYX opera la cartera, pero el acreedor del pago es Patrimonio.
         assertEquals(HttpStatus.FORBIDDEN,
                 assertThrows(ApiException.class, () -> servicio.get(otraEmpresa, 41L)).getStatus());
+    }
+
+    @Test
+    void confirm_webpay_exitoso_marca_como_pagado_y_encola_aviso() {
+        Payment pago = pagoAbierto();
+        pago.setGateway(Payment.Gateway.webpay);
+        pago.setGatewayTxnId("tok_123");
+        when(payments.findByGatewayAndGatewayTxnId(Payment.Gateway.webpay, "tok_123")).thenReturn(Optional.of(pago));
+        when(webpay.commitTransaction("tok_123")).thenReturn(new com.tbridge.payments.dto.gateway.WebpayCommitResponse(
+                "TSY", 410000L, "AUTHORIZED", "ORD41T123", "SESS41", null, "1003", "2026-10-03", "1213", "VN", 0, null, 0, null
+        ));
+
+        PaymentService.WebpayCommitResult resultado = servicio.confirmWebpay("tok_123", null);
+
+        assertTrue(resultado.success());
+        assertEquals(Payment.Status.paid, resultado.payment().status());
+        verify(avisos).save(any(DebtNotification.class));
+    }
+
+    @Test
+    void confirm_webpay_rechazado_marca_como_fallido() {
+        Payment pago = pagoAbierto();
+        pago.setGateway(Payment.Gateway.webpay);
+        pago.setGatewayTxnId("tok_fail");
+        when(payments.findByGatewayAndGatewayTxnId(Payment.Gateway.webpay, "tok_fail")).thenReturn(Optional.of(pago));
+        when(webpay.commitTransaction("tok_fail")).thenReturn(new com.tbridge.payments.dto.gateway.WebpayCommitResponse(
+                "TSN", 410000L, "FAILED", "ORD41T123", "SESS41", null, "1003", "2026-10-03", null, "VN", -1, null, 0, null
+        ));
+
+        PaymentService.WebpayCommitResult resultado = servicio.confirmWebpay("tok_fail", null);
+
+        assertFalse(resultado.success());
+        assertEquals(Payment.Status.failed, resultado.payment().status());
     }
 }
