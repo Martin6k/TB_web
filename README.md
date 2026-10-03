@@ -2,23 +2,27 @@
 
 [![CI](https://github.com/TechnicalBridge/TB_web/actions/workflows/ci.yml/badge.svg)](https://github.com/TechnicalBridge/TB_web/actions/workflows/ci.yml)
 
-Plataforma de pago y repactación de deudas. Proyecto de Capstone; las empresas, las personas y
-los RUT son ficticios.
+Plataforma donde el deudor en cobranza **paga, repacta o reclama** su deuda, sea del rubro que
+sea: arriendos, aranceles, tratamientos, planes mensuales. Proyecto de Capstone; las empresas, las
+personas y los RUT son ficticios.
 
-**Contexto:** Kobra fue el cliente directo original del equipo y se retiró. Para continuar el
-Capstone se creó **APOFYX como cliente ficticio**. DataBridge es la solución tecnológica que
-se demuestra con APOFYX y con Patrimonio Inmuebles como acreedor ficticio. Las pasarelas de
-pago de esta implementación son simulaciones.
+**Contexto.** Kobra fue el cliente directo original del equipo y se retiró. Para continuar el
+Capstone se creó **APOFYX**, una agencia de cobranza ficticia. DataBridge es la solución
+tecnológica, y se demuestra con APOFYX y tres acreedores ficticios de rubros distintos:
 
-La [evaluación local](#evaluación-local-del-29-de-septiembre-de-2026) reúne resultados actuales
-y límites. La [evaluación general](../EVALUACION_GENERAL.md) conecta las tres aplicaciones
-cuando están juntas en la carpeta Capstone; la bitácora `Technical-Bridge/` queda excluida.
+- Patrimonio Inmuebles (arriendos);
+- Instituto Andes (aranceles);
+- Clínica Dental Sonrisa Norte (tratamientos).
 
-**Todo el sistema se levanta con una orden** y queda en http://localhost:8080 — no hace falta
-tener instalado JDK, Node ni Python, solo Docker:
+**Khipu cobra de verdad** cuando DataBridge tiene la llave de una cuenta de cobro: el deudor paga
+con una transferencia en la página de Khipu (con una cuenta en modo desarrollador, contra un banco
+ficticio). Webpay y Mercado Pago son simulaciones.
+
+**Todo el sistema se levanta con una orden** y queda en http://localhost:8080. Solo hace falta
+Docker; no hay que instalar JDK, Node ni Python:
 
 ```powershell
-docker compose --profile app up -d --wait
+docker compose --profile app up -d --build --wait
 ```
 
 | | |
@@ -26,6 +30,7 @@ docker compose --profile app up -d --wait
 | [1. Descripción](#1-descripción) | [2. Tecnologías](#2-tecnologías-utilizadas) · [3. Cómo ejecutarlo](#3-cómo-ejecutar-el-proyecto-localmente) · [4. Equipo](#4-integrantes-del-equipo) |
 | [5. Metodología](#5-metodología-de-trabajo) | [6. Arquitectura](#6-arquitectura-de-la-solución) · [7. Modelo de datos](#7-modelo-de-datos) · [8. Diagramas UML](#8-diagramas-uml) |
 | [9. Requisitos no funcionales](#9-requisitos-no-funcionales) | [10. Docker](#10-docker) · [11. Pruebas](#11-pruebas) · [12. Innovación](#12-innovación) |
+| [Recorrido de demostración](#recorrido-de-demostración) | [Estado al 3 de octubre de 2026](#estado-al-3-de-octubre-de-2026) |
 
 ---
 
@@ -33,56 +38,77 @@ docker compose --profile app up -d --wait
 
 ### Qué hace
 
-DataBridge es donde **el deudor moroso paga**. Entra con su RUT y un código de seis caracteres
-que le llegó por correo o WhatsApp —sin cuenta, sin contraseña—, ve exactamente qué debe y a
-quién, y puede pagarlo de una vez o repactarlo en 3 a 24 cuotas sin interés. En convenio, paga
-una cuota o varias a la vez, siempre desde la que vence primero. Una barra le muestra en qué va
-cada deuda: **pendiente → en convenio → pago conciliado**. Si tiene dudas, le pregunta a un
-asistente que lee su deuda con su propia sesión. Cuando termina de pagar, descarga su certificado
-de deuda cero.
+**DataBridge es donde el deudor moroso paga.** Entra con su RUT y un código de seis caracteres que
+le llegó por correo, sin cuenta ni contraseña. Ve qué debe y a quién, y decide:
 
-Adentro tiene también sus **próximos vencimientos**, que puede pasar al calendario del teléfono;
-su **historial de pagos**, con un comprobante en PDF de cada uno; un **recordatorio por correo**
-unos días antes de cada cuota, que no lleva monto ni enlace, y **sus datos**, donde apaga ese
-recordatorio si no lo quiere.
+- **pagar de una vez**, con Webpay, Mercado Pago o Khipu;
+- **repactar en 3 a 24 cuotas sin interés**, y pagar una o varias, siempre desde la que vence
+  primero;
+- **reclamar** si la deuda no corresponde (no la reconoce, ya la pagó, o el monto está mal).
+  Mientras la empresa lo revisa, la deuda no se cobra ni le llegan recordatorios.
 
-**El alcance son los deudores morosos.** Una deuda entra a cobranza con al menos **dos meses
-impagos** (`MIN_MESES_IMPAGOS`); con menos todavía no es mora, y se rechaza sola al recibir la
-cartera con el código `bajo_umbral_mora`. Se cuentan meses, no cargos: el arriendo y el gasto
-común de septiembre son un solo mes.
+Una barra le muestra en qué va cada deuda: **pendiente → en convenio → pago conciliado**. Si tiene
+dudas, le pregunta a un asistente que lee su deuda con su propia sesión. Cuando termina de pagar,
+descarga su certificado de deuda cero.
 
-**El mes siguiente**, el acreedor vuelve a mandar su cartera, y eso no deshace lo que el deudor ya
-acordó. Un convenio sigue en pie: el mes nuevo se agrega como una cuota aparte, que el portal
-marca *Fuera del convenio*. Una deuda pagada se reabre si el deudor se vuelve a atrasar, y cuenta
-como una entrada nueva, con el mismo mínimo de dos meses. Y la que pasa los 120 días de mora, APOFYX
-la devuelve al acreedor y DataBridge deja de cobrarla (`fuera_de_mandato`). El detalle está en las
-[reglas de la cartera](docs/integracion/README.md#64-reglas-de-validación).
+Adentro tiene además:
+
+- sus **próximos vencimientos**, que puede pasar al calendario del teléfono;
+- su **historial de pagos**, con un comprobante en PDF de cada uno;
+- un **recordatorio por correo** unos días antes de cada cuota, sin monto ni enlace;
+- **sus datos**, donde apaga ese recordatorio si no lo quiere.
+
+**La empresa que gestiona la cartera** —la agencia, o el acreedor que cobra directo— la ve al
+día desde el mismo portal:
+
+- carga deudas por API o arrastrando un CSV;
+- ve cuándo se invitó a cada deudor y le **reenvía el código** si lo perdió;
+- **resuelve los reclamos**, reanudando el cobro o retirando la deuda;
+- revisa los pagos que entraron y sigue los **convenios en riesgo** (con una cuota vencida);
+- mira en un panel cuánto se ha recuperado y exporta la cartera a Excel;
+- emite y revoca sus propias claves de API.
+
+**El acreedor no entra nunca:** cada pago, convenio o reclamo le llega como un aviso firmado a su
+propio sistema.
+
+### Las reglas de la cartera
+
+**El alcance son los deudores morosos.** Una deuda entra a cobranza cuando su cargo impago más
+antiguo lleva al menos **30 días vencido** (`MIN_DIAS_MORA`). Con menos todavía no es mora, y se
+rechaza al recibir la cartera con el código `bajo_umbral_mora`. Se mide en días, y no en meses
+impagos, para que sirva en cualquier rubro: un arriendo con dos meses atrasados y un tratamiento
+dental de un solo cargo vencido hace 75 días son igual de morosos.
 
 **Llegan todos los clientes, deban o no.** El acreedor entrega cada mes a todos sus clientes con
 contrato, y DataBridge detecta al moroso. El que está al día viene con `cargos: []`:
 
-- si es nuevo, el resultado es `al_dia` y no se guarda nada;
-- si estaba en cobranza, la deuda se cierra como retirada con motivo `pago_directo`, porque pagó
-  directo al acreedor.
+| La deuda | Qué pasa |
+| --- | --- |
+| Es nueva | Resultado `al_dia`: no se guarda nada |
+| Estaba en cobranza | Se cierra como retirada, motivo `pago_directo`: pagó directo al acreedor |
+| Ya estaba pagada o retirada | Nada |
 
-**La invitación sale sola.** Cuando una deuda entra, o se reabre, DataBridge le manda al deudor su
+**El mes siguiente no deshace lo acordado.**
+
+- Un convenio sigue en pie: el mes nuevo se agrega como una cuota aparte, que el portal marca
+  *Fuera del convenio*.
+- Una deuda pagada se reabre si el deudor se vuelve a atrasar, con el mismo mínimo de 30 días.
+- La que pasa los 120 días de mora, APOFYX la devuelve al acreedor y DataBridge deja de cobrarla
+  (`fuera_de_mandato`).
+
+**La invitación sale sola.** Cuando una deuda entra o se reabre, DataBridge le manda al deudor su
 código por correo, sin monto ni enlace. Si el envío falla, la cartera entra igual, y desde el
 portal se reenvía.
 
-Del otro lado, la empresa que gestiona la cartera la ve al día, carga deudas nuevas por API o
-arrastrando un CSV, ve cuándo se invitó a cada deudor, le **reenvía el código** si lo perdió y
-mira en un panel cuánto se ha recuperado.
-Revisa los pagos que entraron, filtrados por medio de pago; sigue los **convenios en riesgo**,
-los que tienen una cuota vencida; exporta la cartera a Excel, y emite y revoca sus propias
-claves de API.
+El detalle está en las [reglas del contrato](docs/integracion/README.md#64-reglas-de-validación).
 
 ### A quién va dirigido
 
 | Quién | Qué hace acá |
 | --- | --- |
-| **La persona que debe** | Entra, mira, repacta y paga. Es quien usa el portal de verdad |
-| **La agencia de cobranza** (APOFYX) | Entrega la cartera, envía los códigos y sigue la recuperación |
-| **El acreedor** (Patrimonio Inmuebles) | No entra nunca: recibe el aviso de cada pago en su propio sistema |
+| **La persona que debe** | Entra, mira, repacta, paga o reclama. Es quien usa el portal de verdad |
+| **La agencia de cobranza** (APOFYX) | Entrega la cartera, envía los códigos, resuelve los reclamos y sigue la recuperación |
+| **El acreedor** (una inmobiliaria, un instituto, una clínica) | No entra: recibe en su propio sistema el aviso de cada pago, convenio o reclamo |
 
 ### Qué problema resuelve
 
@@ -90,10 +116,12 @@ Cobrar deudas chicas cuesta más que la deuda. Una llamada a alguien que debe $4
 margen, así que a esa persona nadie la llama: le mandan cartas, la mandan a DICOM y la deuda
 envejece hasta que se castiga.
 
-Y del otro lado está el problema espejo, que es el que casi nadie mira: **el deudor que sí quiere
-pagar no puede**. Tiene que llamar en horario de oficina, esperar, dar sus datos y que alguien le
-diga cuánto debe. DataBridge saca a la persona del medio en los dos sentidos: el deudor paga solo
-a las 11 de la noche si quiere, y el acreedor se entera sin que nadie escriba un correo.
+Del otro lado está el problema espejo, el que casi nadie mira: **el deudor que sí quiere pagar no
+puede**. Tiene que llamar en horario de oficina, esperar, dar sus datos y que alguien le diga
+cuánto debe. Y si cree que la deuda no es suya, no tiene dónde decirlo.
+
+DataBridge saca a la persona del medio en los dos sentidos. El deudor paga, repacta o reclama
+solo, a las 11 de la noche si quiere. El acreedor se entera sin que nadie escriba un correo.
 
 ---
 
@@ -101,25 +129,29 @@ a las 11 de la noche si quiere, y el acreedor se entera sin que nadie escriba un
 
 | Capa | Tecnología | Por qué |
 | --- | --- | --- |
-| **Lenguajes** | Java 25, JavaScript (ES2022), Python 3.13 | |
-| **Backend** | Spring Boot 3.5 · Spring Cloud Gateway · Spring Security · Spring Data JPA · Bean Validation | Cuatro microservicios independientes |
-| **API** | springdoc-openapi (Swagger) · Spring HATEOAS · Spring Boot Actuator | Documentación de todos los endpoints en una página; respuestas que dicen qué se puede hacer después; salud para Docker |
-| **Asistente** | FastAPI + Uvicorn | El único servicio que no es de Spring: la librería de lenguaje natural vive en Python |
+| **Lenguajes** | Java 25 · JavaScript (ES2022) · Python 3.13 | |
+| **Backend** | Spring Boot 3.5 · Spring Cloud Gateway · Spring Security · Spring Data JPA · Bean Validation | Cuatro microservicios de Spring y un gateway |
+| **API** | springdoc-openapi (Swagger) · Spring HATEOAS · Spring Boot Actuator | Todos los endpoints en una página; respuestas que dicen qué se puede hacer después; salud para Docker |
+| **Asistente** | FastAPI + Uvicorn | El único servicio que no es de Spring: el procesamiento de lenguaje vive en Python |
 | **Frontend** | React 18 · React Router 7 · Vite · Zustand · Recharts · CSS propio | |
-| **Base de datos** | **MySQL 8.4**, una por servicio | El mismo motor que usa APOFYX, para no tener dos en el proyecto |
+| **Base de datos** | **MySQL 8.4**, una base por servicio | El mismo motor que usa APOFYX |
 | **Migraciones** | Flyway, con `ddl-auto: validate` | El esquema se versiona; Hibernate no lo cambia a espaldas de nadie |
 | **Mensajería** | RabbitMQ 3.13 | Lleva el aviso de pago entre servicios |
+| **Pagos** | Khipu, API de pagos v3 | Cobro real por transferencia. Webpay y Mercado Pago, simulados |
 | **Autenticación** | JWT (JJWT) · códigos de un solo uso | Sin contraseñas |
+| **Cifrado** | AES-256-GCM, de la JCA | Los secretos que hay que leer de vuelta se guardan cifrados |
 | **Contenedores** | Docker · Docker Compose | Nueve contenedores, una orden |
 | **Pruebas** | JUnit 5 · Mockito · MockMvc · k6 | Unitarias, de la capa web y de rendimiento |
-| **Integración continua** | GitHub Actions | Corre las pruebas en cada push |
+| **Integración continua** | GitHub Actions · CodeQL · Dependabot | Pruebas y análisis de seguridad en cada push |
 | **Servidor web** | nginx (sin privilegios) | Sirve el portal compilado y hace de proxy al gateway |
 | **Correo** | Mailpit | Buzón de prueba: recibe los códigos sin mandárselos a nadie |
 
-**Despliegue de referencia:** local, con contenedores. Un despliegue remoto requiere preparar
-su configuración y operación. Las dependencias externas opcionales son la API del Banco
-Central para obtener la UF y el proveedor de LLM configurado para `ms-ai` mediante
-`XAI_API_KEY` y `XAI_BASE_URL`. Sin LLM funciona el motor de reglas; la UF puede cargarse manualmente.
+**Nube:** ninguna. El despliegue de referencia es local, con contenedores. Las dependencias
+externas son tres, y ninguna es obligatoria:
+
+- **Khipu**, para cobrar de verdad. Sin `KHIPU_LLAVE`, Khipu queda simulada.
+- **El Banco Central**, para la UF. Sin credenciales, la UF se carga a mano.
+- **Un LLM** para el asistente (`XAI_API_KEY`). Sin él, responde con reglas.
 
 ---
 
@@ -135,9 +167,8 @@ cd TB_web
 docker compose --profile app up -d --build --wait
 ```
 
-Levanta el backend y el portal **a la par**. `--wait` devuelve el control recién cuando los
-nueve contenedores están **sanos**, no cuando arrancaron. La primera vez demora unos minutos
-porque compila; después son segundos.
+`--wait` devuelve el control recién cuando los nueve contenedores están **sanos**, no cuando
+arrancaron. La primera vez demora unos minutos porque compila; después son segundos.
 
 | | |
 | --- | --- |
@@ -149,24 +180,38 @@ porque compila; después son segundos.
 
 Para apagar: `docker compose --profile app down`. Con `-v` borra además los datos.
 
+### Para entrar como empresa
+
+En el portal, **Soy de una empresa**, con `camila.reyes@apofyx.cl`. El enlace para entrar llega
+al buzón de prueba.
+
 ### Para entrar como deudor
 
-El sistema arranca con la cartera de ejemplo de Patrimonio Inmuebles, con cada deudor en una
-situación distinta. Es la misma historia que cargan Patrimonio y APOFYX en sus propios datos de
-ejemplo, así que los tres sistemas cuentan lo mismo:
+El sistema arranca con la cartera de ejemplo de tres acreedores que APOFYX cobra por su cuenta,
+cada deudor en una situación distinta. Es la misma historia que cargan APOFYX y Patrimonio en sus
+propios datos de ejemplo, así que los tres sistemas cuentan lo mismo:
 
-| RUT | Deudor | Situación |
-| --- | --- | --- |
-| 16.482.337-7 | Felipe Rojas Muñoz | En convenio de 6 cuotas, con 3 pagadas |
-| 76.991.245-2 | Comercial Ñandú SpA | Debe tres meses en UF |
-| 14.583.206-3 | Rodrigo Pérez Contreras | Debe cuatro meses |
-| 76.284.519-9 | Panadería La Espiga Ltda. | En convenio en UF, con la primera cuota pagada en pesos |
-| 17.893.456-2 | Ignacio Tapia Rojas | En convenio, con la primera cuota vencida: es el *convenio en riesgo* |
-| 19.230.418-0 | Carolina Muñoz Vera | Pagó todo de una vez, con Khipu |
-| 18.642.975-3 | Daniela Cáceres Flores | Pagó sus tres cuotas juntas |
-| 15.227.640-0 | Tomás Fuentes Leiva | Pagó en la oficina de Patrimonio: la cartera siguiente lo trajo al día y la deuda se cerró |
+| RUT | Deudor | Acreedor | Situación |
+| --- | --- | --- | --- |
+| 16.482.337-7 | Felipe Rojas Muñoz | Patrimonio Inmuebles | En convenio de 6 cuotas, con 3 pagadas |
+| 76.991.245-2 | Comercial Ñandú SpA | Patrimonio Inmuebles | Debe tres meses de arriendo en UF |
+| 14.583.206-3 | Rodrigo Pérez Contreras | Patrimonio Inmuebles | Debe cuatro meses |
+| 76.284.519-9 | Panadería La Espiga Ltda. | Patrimonio Inmuebles | En convenio en UF, con la primera cuota pagada en pesos |
+| 17.893.456-2 | Ignacio Tapia Rojas | Patrimonio Inmuebles | En convenio, con la primera cuota vencida: es el *convenio en riesgo* |
+| 19.230.418-0 | Carolina Muñoz Vera | Patrimonio Inmuebles | Pagó todo de una vez, con Khipu |
+| 18.642.975-3 | Daniela Cáceres Flores | Patrimonio Inmuebles | Pagó sus tres cuotas juntas |
+| 15.227.640-0 | Tomás Fuentes Leiva | Patrimonio Inmuebles | Pagó en la oficina: la cartera siguiente lo trajo al día y la deuda se cerró |
+| 21.345.678-4 | Benjamín Araya Toro | Instituto Andes | Debe tres aranceles |
+| 20.876.543-4 | Josefina Vidal Cortés | Instituto Andes | Pagó sus dos aranceles con Webpay |
+| 13.579.246-2 | Patricio Muñoz Salas | Clínica Dental Sonrisa Norte | Debe una ortodoncia de un solo cargo, vencida hace 75 días |
+| 16.789.012-1 | Fernanda Silva Rojas | Clínica Dental Sonrisa Norte | En convenio de 6 cuotas por un implante, con la primera pagada |
 
-Para conseguir un código:
+Instituto Andes entregó su cartera en la planilla CSV y Sonrisa Norte por API. Las deudas de
+Sonrisa Norte son de un solo cargo: muestran que la regla de los 30 días sirve también fuera de
+los cobros mensuales.
+
+Para conseguir un código, la empresa toca **Reenviar código** en su cartera y el código llega al
+buzón. También se puede pedir directo a ms-auth:
 
 ```powershell
 $cuerpo = @{ rut = "16482337-7"; canales = @("correo"); correo = "felipe.rojas@correo.cl"
@@ -175,16 +220,34 @@ $cuerpo | docker compose exec -T ms-auth curl -s -X POST http://127.0.0.1:8081/i
   -H "X-Internal-Key: tbridge-internal-dev" -H "Content-Type: application/json" --data-binary "@-"
 ```
 
-Responde con el `codigo`. Con él se entra al portal en **Tengo un código de acceso**, con el
-RUT `16.482.337-7`. El código sirve **una sola vez** y dura 24 horas. También llega al buzón de
-prueba.
+Responde con el `codigo`. Con él se entra al portal en **Tengo un código de acceso**, con el RUT
+`16.482.337-7`. El código sirve **una sola vez** y dura 24 horas.
 
 > El JSON va por la entrada estándar (`--data-binary "@-"`) y no como argumento a propósito:
-> PowerShell 5.1 parte en dos un argumento que trae comillas y espacios, y `curl` recibía medio
-> JSON.
+> PowerShell 5.1 parte en dos un argumento que trae comillas y espacios. Y se pide desde dentro
+> del contenedor porque los endpoints internos **no** están publicados hacia afuera
+> ([§9](#9-requisitos-no-funcionales)).
 
-> Se pide desde dentro del contenedor a propósito: los endpoints internos **no** están
-> publicados hacia afuera. Ver [§9](#9-requisitos-no-funcionales).
+### Para pagar con Khipu de verdad
+
+Sin configurar nada, las tres pasarelas son simuladas. Para que Khipu cobre de verdad hace falta
+la llave de una cuenta de cobro:
+
+1. En [khipu.com](https://khipu.com), crea una cuenta y una **cuenta de cobro en modo
+   desarrollador**: ahí los bancos y la plata son de mentira.
+2. En las opciones de esa cuenta, *Para integrar Khipu a tu sitio web*, crea una **llave de API**.
+3. Copia `.env.example` como `.env` y pon la llave en `KHIPU_LLAVE`. **La llave es un secreto:**
+   el `.env` no se sube al repositorio.
+4. `docker compose --profile app up -d ms-payments` para que la tome.
+
+Con eso, **Khipu** abre la página de Khipu. Se paga con el banco de prueba (DemoBank), y Khipu
+devuelve al portal, que le pregunta a Khipu cómo quedó: *Verificando tu pago* y después **Pago
+aprobado**. Si el deudor se arrepiente en Khipu, el pago queda como no completado y la deuda
+sigue igual.
+
+Khipu no puede avisarle a un DataBridge que corre en `localhost`, así que ms-payments le pregunta
+a Khipu por los cobros abiertos cada 30 segundos. Con una dirección pública, `KHIPU_URL_AVISOS` y
+`KHIPU_SECRETO` activan el aviso firmado de Khipu.
 
 ### Para programar
 
@@ -222,9 +285,9 @@ npm install
 npm run dev
 ```
 
-El portal queda en http://localhost:5173, servido por Vite con recarga automática, y Swagger en
-http://localhost:5173/swagger-ui.html. Si cambias algo en `common`, vuelve a correr el `install`:
-los servicios usan la copia instalada, no el código.
+El portal queda en http://localhost:5173, servido por Vite con recarga automática. Si cambias
+algo en `common`, vuelve a correr el `install`: los servicios usan la copia instalada, no el
+código.
 
 ---
 
@@ -245,18 +308,18 @@ los servicios usan la copia instalada, no el código.
 
 **Kanban**, con prácticas de **DevOps** para la entrega.
 
-El trabajo se organizó en un tablero Kanban dividido en cinco épicas —autenticación, gestión de
-deudas, pagos, asistente, y reportes— con un backlog de tareas que se fueron tomando de a una.
-El seguimiento tarea por tarea, con dónde quedó cada una y **en qué nos apartamos del plan
-original y por qué**, está en [`docs/plan-kanban.md`](docs/plan-kanban.md).
+El trabajo se organizó en un tablero Kanban con cinco épicas —autenticación, gestión de deudas,
+pagos, asistente y reportes— y un backlog de tareas que se fueron tomando de a una. El
+seguimiento tarea por tarea, con **en qué nos apartamos del plan original y por qué**, está en
+[`docs/plan-kanban.md`](docs/plan-kanban.md).
 
-De DevOps se tomaron tres cosas, no por moda sino porque resolvían un problema concreto:
+De DevOps se tomaron tres prácticas, cada una porque resolvía un problema concreto:
 
 | Práctica | Qué resuelve |
 | --- | --- |
 | **Integración continua** (GitHub Actions) | Las pruebas corren en cada push, en un equipo limpio. Lo que funciona "en mi máquina" no cuenta |
-| **Infraestructura como código** (Docker Compose) | Levantar el sistema es una orden y no una página de instrucciones que alguien sigue mal |
-| **Esquema versionado** (Flyway) | Cambiar la base es un archivo con número, revisable, no un `ALTER TABLE` que alguien corrió una vez |
+| **Infraestructura como código** (Docker Compose) | Levantar el sistema es una orden, y no una página de instrucciones que alguien sigue mal |
+| **Esquema versionado** (Flyway) | Cambiar la base es un archivo con número, revisable, y no un `ALTER TABLE` que alguien corrió una vez |
 
 ---
 
@@ -272,7 +335,7 @@ flowchart TD
     P -->|"/api/*"| G["Gateway · Spring Cloud Gateway<br/>CORS · límite de peticiones · enrutamiento"]
 
     G -->|"/api/auth/** · /api/me"| A["ms-auth<br/>códigos de acceso y JWT"]
-    G -->|"/api/debts/** · /api/claves/** · /api/analytics/** · /api/v1/**"| D["ms-debt<br/>deudas, cuotas y cartera"]
+    G -->|"/api/debts/** · /api/claves/** · /api/analytics/** · /api/v1/**"| D["ms-debt<br/>deudas, cuotas, reclamos y cartera"]
     G -->|"/api/payments/**"| Y["ms-payments<br/>cobros y UF"]
     G -->|"/api/ai/**"| I["ms-ai<br/>asistente, solo lectura"]
 
@@ -283,6 +346,7 @@ flowchart TD
     Y -.->|"pago.confirmado"| R{{"RabbitMQ"}}
     R -.-> D
     I -->|"con la sesión del deudor"| D
+    Y <==>|"crear el cobro y preguntar en qué va"| T["Khipu"]
 
     AP["APOFYX"] ==>|"Cartera v1 · clave de API"| D
     D ==>|"eventos firmados con HMAC"| AP
@@ -292,13 +356,13 @@ flowchart TD
 
 | Pieza | Qué hace |
 | --- | --- |
-| **portal** | React con Zustand y CSS propio. En producción se compila y lo sirve nginx, que además hace de proxy hacia el gateway: el navegador ve un solo origen y no hay CORS que resolver |
-| **gateway** | La única puerta. CORS, límite de peticiones con Bucket4j y enrutamiento. Lo que no pasa por aquí, no entra |
-| **ms-auth** | Código de acceso (RUT + 6 caracteres, un solo uso, 24 h) y enlace de respaldo por correo, que es también como entra el personal de las empresas. Emite el JWT y manda los correos, incluido el recordatorio de cuota |
-| **ms-debt** | Deudas, cargos y cuotas; simulación y aceptación de planes (3 a 24 meses, sin interés); ingesta de la cartera v1 por API o CSV; eventos de vuelta a quien entregó la cartera; resumen para el dashboard; certificado de deuda pagada y comprobante de cada pago, en PDF; recordatorio de las cuotas por vencer; claves de API de cada empresa |
-| **ms-payments** | Cobros con Webpay, Mercado Pago y Khipu simulados. El monto lo decide ms-debt, nunca el navegador. En UF fija los pesos al abrir el cobro |
-| **ms-ai** | Asistente de solo lectura (Python/FastAPI). Lee las deudas con la sesión del deudor, nunca con acceso propio a la base, y detecta frustración o desconfianza para ajustar el tono. Usa un LLM si hay `XAI_API_KEY`; si no, reglas |
-| **MySQL 8.4** | Una base por servicio, con esquema versionado en Flyway ([`db/README.md`](db/README.md)) |
+| **portal** | React con Zustand y CSS propio. Se compila y lo sirve nginx, que además hace de proxy hacia el gateway: el navegador ve un solo origen y no hay CORS que resolver |
+| **gateway** | La única puerta: CORS, límite de peticiones con Bucket4j y enrutamiento |
+| **ms-auth** | Código de acceso (RUT + 6 caracteres, un solo uso, 24 h) y enlace de respaldo por correo, que es también como entra el personal de las empresas. Emite el JWT, maneja las sesiones y manda los correos, incluido el recordatorio de cuota |
+| **ms-debt** | Deudas, cargos y cuotas; convenios de 3 a 24 cuotas sin interés; reclamos y su resolución; ingesta de la cartera v1 por API o CSV; eventos de vuelta a quien entregó la cartera; resumen para el panel; certificado y comprobantes en PDF; recordatorio de las cuotas por vencer; claves de API de cada empresa |
+| **ms-payments** | Los cobros. Khipu de verdad, si tiene llave; Webpay y Mercado Pago simulados. El monto lo decide ms-debt, nunca el navegador. En UF fija los pesos al abrir el cobro. Un cobro de Khipu que nadie paga se vence a los 30 minutos |
+| **ms-ai** | Asistente de solo lectura (Python/FastAPI). Lee las deudas con la sesión del deudor, sin acceso propio a la base, y detecta frustración o desconfianza para ajustar el tono. Usa un LLM si hay `XAI_API_KEY`; si no, reglas |
+| **MySQL 8.4** | Una base por servicio, con el esquema versionado en Flyway ([`db/README.md`](db/README.md)) |
 | **RabbitMQ** | Lleva el aviso de pago de ms-payments a ms-debt. Si está apagado, el mismo aviso va por HTTP; en los dos casos sale de una bandeja con reintentos, así que no se pierde |
 
 ### Cómo está organizado cada servicio
@@ -308,7 +372,7 @@ los otros:
 
 ```
 com/tbridge/<servicio>/
-├── config/        seguridad, Swagger (OpenApiConfig), RabbitMQ, datos de ejemplo
+├── config/        seguridad, Swagger, RabbitMQ, cifrado, datos de ejemplo
 ├── controller/    los endpoints: traducen HTTP y delegan, sin reglas de negocio
 ├── service/       las reglas de negocio
 ├── repository/    el acceso a la base (Spring Data JPA)
@@ -316,36 +380,36 @@ com/tbridge/<servicio>/
 ├── dto/request/   lo que entra, validado con Bean Validation
 ├── dto/response/  lo que sale, documentado para Swagger
 ├── assembler/     los enlaces de HATEOAS de cada recurso
-├── client/        las llamadas a otros sistemas (otro servicio, el Banco Central)
+├── client/        las llamadas a otros sistemas (otro servicio, Khipu, el Banco Central)
 └── exception/     los errores propios del servicio
 ```
 
 `common` es la librería que comparten: el JWT, el manejo de errores (todos responden
 `{"error": "..."}` con el código que corresponde) y el RUT. El gateway no tiene base: solo
-`config/` (las rutas) y `filter/` (el límite de peticiones).
+`config/` (las rutas) y `filter/` (el límite de peticiones y la IP real).
 
 **Swagger.** Cada servicio documenta sus endpoints en tres grupos según quién los llama —el
-**portal**, el **contrato de integración** y lo **interno**— y el gateway los junta en una sola
+**portal**, el **contrato de integración** y lo **interno**—, y el gateway los junta en una sola
 página: http://localhost:8080/swagger-ui.html. El botón *Authorize* recibe el JWT del portal, la
 clave de API del contrato o la clave interna.
 
 **HATEOAS.** Las respuestas del portal traen `_links` con lo que se puede hacer después, según el
-estado y quién mira: una deuda pendiente le ofrece al deudor `simular`, `repactar` y `pagar`; a la
-empresa, `enviar-codigo`; una deuda pagada, el `certificado`; un pago, su `comprobante`; una
-clave de API vigente, `revocar`. Las listas vienen en
-`_embedded` (`_embedded.debts`). Los enlaces salen con la dirección pública
-(`http://localhost:8080/...`), no con la del contenedor, porque cada servicio lee las cabeceras
-`X-Forwarded-*` que le pasa el gateway. El contrato `/api/v1` no lleva enlaces: su forma está
+estado y quién mira:
+
+- una deuda pendiente le ofrece al deudor `simular`, `repactar`, `pagar` y `disputar`;
+- a la empresa, `enviar-codigo`, y si la deuda está en reclamo, `resolver-disputa`;
+- una deuda pagada ofrece el `certificado`, y un pago su `comprobante`;
+- una clave de API vigente, `revocar`.
+
+Los enlaces salen con la dirección pública (`http://localhost:8080/...`) porque cada servicio lee
+las cabeceras `X-Forwarded-*` del gateway. El contrato `/api/v1` no lleva enlaces: su forma está
 publicada y la leen sistemas de otras empresas.
 
-**Configuración.** Cada servicio tiene `application.properties` (todo con
-`${VARIABLE:valor por omisión}`), `application-dev.properties` para programar y
-`application-test.properties` para las pruebas. RabbitMQ se enciende con `EVENTS_RABBIT=true`, y
-de esa sola propiedad dependen la cola, el listener y su indicador de salud.
+**Configuración.** Cada servicio tiene `application.properties`, con todo en
+`${VARIABLE:valor por omisión}`; `application-dev.properties` para programar, y
+`application-test.properties` para las pruebas.
 
 ### Comunicación entre servicios
-
-Tres formas, y cada una está donde está por una razón:
 
 | Entre quiénes | Cómo | Por qué así |
 | --- | --- | --- |
@@ -353,13 +417,14 @@ Tres formas, y cada una está donde está por una razón:
 | Sistemas de las agencias → ms-debt | HTTP por el gateway (`/api/v1`), con clave de API | Entran por la misma puerta, con su límite de peticiones |
 | ms-payments → ms-debt | **RabbitMQ**, cola `ms-debt.pagos-confirmados` | El pago ya ocurrió: si ms-debt está caído, el aviso espera en la cola en vez de perderse |
 | ms-debt → ms-auth, ms-payments → ms-debt | HTTP interno con `X-Internal-Key`, fuera del gateway | Son llamadas entre servicios, no de usuarios. El gateway no las expone |
+| ms-payments ↔ Khipu | HTTPS con la llave de la cuenta de cobro (`x-api-key`) | Crear el cobro y preguntar en qué va; el navegador solo va y vuelve |
 | APOFYX ↔ DataBridge | HTTP con clave de API, y eventos firmados con HMAC-SHA256 | Son empresas distintas: ninguna entra en la base de la otra |
 
 ```
 Contrato v1, de sistema a sistema (con clave de API):
   APOFYX ── GET /api/v1/cuenta ───────────────────────────────────────────► ms-debt
   APOFYX ── POST /api/v1/carteras, /mandatos, /campanas, /suscripciones ──► ms-debt
-  ms-debt ── eventos firmados (pago.confirmado, deuda.saldada, ...) ──────► APOFYX
+  ms-debt ── eventos firmados (pago.confirmado, deuda.disputada, ...) ────► APOFYX
 
 Entre servicios (clave interna, no expuesto por el gateway):
   ms-payments ── /internal/events/pago-confirmado ──► ms-debt
@@ -380,12 +445,17 @@ El contrato completo, con sus ejemplos y su esquema JSON, está en
 ## 7. Modelo de datos
 
 **Una base por servicio**, las tres en el mismo MySQL 8.4. No comparten tablas: si ms-payments
-necesita saber cuánto se debe, se lo **pregunta** a ms-debt, no lo lee de su base. Eso permite
-que cada servicio cambie su esquema sin romper a los demás, e impide que un error en pagos
-corrompa la cartera.
+necesita saber cuánto se debe, se lo **pregunta** a ms-debt. Así cada servicio cambia su esquema
+sin romper a los demás, y un error en pagos no puede corromper la cartera.
 
-El esquema lo versiona **Flyway**: cada servicio trae su `V1__esquema_inicial.sql` y arranca con
-`ddl-auto: validate`, que compara las entidades con las tablas y se niega a partir si no calzan.
+El esquema lo versiona **Flyway**, y cada servicio arranca con `ddl-auto: validate`, que compara
+las entidades con las tablas y se niega a partir si no calzan.
+
+| Base | Migraciones |
+| --- | --- |
+| `tb_debt` | `V1` esquema inicial · `V2` recordatorios · `V3` secreto de las suscripciones, cifrado |
+| `tb_auth` | `V1` esquema inicial · `V2` sesiones |
+| `tb_payments` | `V1` esquema inicial |
 
 ### `tb_debt` — la cartera
 
@@ -409,13 +479,18 @@ erDiagram
 
 Trece tablas y dos vistas (`v_debt_balance`, `v_creditor_portfolio`). Lo que conviene mirar:
 
-- **`organizations`** guarda tanto a la inmobiliaria como a la agencia de cobranza, con un `kind`
-  que dice cuál es cuál. Un `mandates` las une: *esta agencia cobra por cuenta de este acreedor,
-  desde esta fecha*. Sin mandato vigente, una cartera se rechaza.
-- **El saldo no se guarda, se calcula.** `debts` tiene sus `debt_charges` y los pagos se anotan
-  aparte; el saldo sale de la vista. Así no hay dos números que puedan discrepar.
+- **`organizations`** guarda a los acreedores y a la agencia, con un `kind` que dice cuál es cuál.
+  No hay rubro: un acreedor es cualquiera que tenga cobros. Un `mandates` las une: *esta agencia
+  cobra por cuenta de este acreedor, desde esta fecha*. Sin mandato vigente, una cartera se
+  rechaza.
+- **El saldo no se guarda, se calcula.** `debts` tiene sus `debt_charges`, los pagos se anotan
+  aparte y el saldo sale de la vista. Así no hay dos números que puedan discrepar.
+- **`debts.status`** es uno de `open`, `repacted`, `disputed`, `paid` o `withdrawn`
+  ([§8](#estados-de-una-deuda)). Un reclamo queda en `debt_events` con su motivo y el texto del
+  deudor, que no sale de DataBridge.
 - **`outbox`** es la bandeja de salida de los eventos, escrita en la misma transacción que el
   hecho que los provoca. Si el sistema se cae entre "cobré" y "avisé", el aviso sigue ahí.
+- **`subscriptions.secret`** va **cifrado** ([§9](#9-requisitos-no-funcionales)).
 
 ### `tb_auth` — quién entra
 
@@ -437,6 +512,11 @@ erDiagram
         string org_rut
         string role "operator o admin"
     }
+    sessions {
+        string token_hash "la llave de renovación"
+        datetime expires_at
+        datetime revoked_at
+    }
     access_log {
         string method "code o magic_link"
         string outcome
@@ -444,9 +524,9 @@ erDiagram
     }
 ```
 
-Cuatro tablas sin relaciones entre sí, y es a propósito: **no hay tabla de usuarios deudores**.
-El deudor no tiene cuenta. Se guarda el hash del código, nunca el código; y en `access_log` el
-hash de la IP, nunca la IP.
+**No hay tabla de usuarios deudores:** el deudor no tiene cuenta. Se guarda el hash del código,
+nunca el código; el hash de la llave de renovación, nunca la llave; y en `access_log` el hash de
+la IP, nunca la IP.
 
 ### `tb_payments` — la plata
 
@@ -456,10 +536,11 @@ erDiagram
     payments ||--|| debt_notifications : "avisa con"
     payments {
         string gateway "webpay, mercadopago o khipu"
-        string gateway_txn_id "UNIQUE junto a gateway"
+        string gateway_txn_id "el payment_id de Khipu; UNIQUE junto a gateway"
+        string status "created, paid, failed, expired..."
         decimal amount
         string currency "CLP o UF"
-        decimal uf_value "la UF del dia, si paga en UF"
+        decimal uf_value "la UF del día, si paga en UF"
     }
     uf_values {
         date day "clave primaria"
@@ -467,7 +548,8 @@ erDiagram
     }
 ```
 
-`payments` es **append-only**: un pago no se edita, se le agregan eventos. `UNIQUE (gateway,
+`payments` es **append-only**: un pago no se edita, se le agregan eventos, y lo que dijo Khipu del
+pago queda entero en `payment_events.gateway_payload`. `UNIQUE (gateway,
 gateway_txn_id)` impide cobrar dos veces la misma transacción aunque la pasarela repita el aviso.
 
 ---
@@ -481,22 +563,26 @@ flowchart LR
     DEU(("Deudor"))
     EMP(("Personal de<br/>la agencia"))
     SIS(("APOFYX<br/>otro sistema"))
+    KHP(("Khipu"))
 
     DEU --> U1["Entrar con RUT y código"]
     DEU --> U2["Ver qué debe y a quién"]
     DEU --> U3["Simular un plan de cuotas"]
     DEU --> U4["Aceptar el plan"]
     DEU --> U5["Pagar"]
+    DEU --> U22["Reclamar una deuda"]
     DEU --> U6["Preguntarle al asistente"]
     DEU --> U7["Descargar el certificado"]
     DEU --> U15["Ver sus próximos vencimientos"]
     DEU --> U16["Descargar el comprobante de un pago"]
     DEU --> U17["Apagar el recordatorio por correo"]
+    U5 --- KHP
 
     EMP --> U8["Ver la cartera al día"]
     EMP --> U9["Cargar cartera por CSV"]
-    EMP --> U10["Enviarle el código al deudor"]
-    EMP --> U11["Ver el dashboard"]
+    EMP --> U10["Reenviarle el código al deudor"]
+    EMP --> U23["Resolver un reclamo"]
+    EMP --> U11["Ver el panel de recuperación"]
     EMP --> U18["Revisar los pagos recibidos"]
     EMP --> U19["Seguir los convenios en riesgo"]
     EMP --> U20["Exportar la cartera a Excel"]
@@ -507,48 +593,74 @@ flowchart LR
     SIS --> U14["Suscribirse a los eventos"]
 ```
 
-El certificado (`U7`) solo se emite si la deuda está **pagada**: una deuda retirada por el
-acreedor también queda en saldo cero, y certificar eso sería decir algo falso.
+El certificado (`U7`) solo se emite si la deuda está **pagada**: una deuda retirada también queda
+en saldo cero, y certificar eso sería decir algo falso.
 
-### Secuencia: el pago, que es la funcionalidad principal
+### Secuencia: el pago con Khipu, que es la funcionalidad principal
 
 ```mermaid
 sequenceDiagram
     actor D as Deudor
     participant P as Portal
-    participant G as Gateway
-    participant A as ms-auth
-    participant M as ms-debt
     participant Y as ms-payments
+    participant M as ms-debt
+    participant K as Khipu
     participant R as RabbitMQ
     participant X as APOFYX
 
     D->>P: RUT + código de 6 caracteres
-    P->>G: POST /api/auth/acceso
-    G->>A: (límite de peticiones por IP)
-    A->>A: compara SHA-256(rut:código), marca usado
-    A-->>D: JWT con el RUT
+    P-->>D: JWT con su RUT (ms-auth, por el gateway)
 
     D->>P: "Pagar" (el saldo, o las cuotas marcadas)
-    P->>G: POST /api/payments/checkout
-    G->>Y: con el JWT
+    P->>Y: POST /api/payments/checkout
     Y->>M: GET /internal/debts/{id}?installmentIds=...
     M-->>Y: monto y RUT del dueño
     Note over M: Las cuotas tienen que ser<br/>las que vencen primero.
-    Note over Y: El monto lo decide ms-debt.<br/>Si es UF, fija los pesos ahora,<br/>con la UF del día en Chile.
-    Y-->>D: pasarela
+    Note over Y: El monto lo decide ms-debt.<br/>Si es UF, fija los pesos<br/>con la UF del día en Chile.
+    Y->>K: POST /v3/payments (monto, transacción, retorno)
+    K-->>Y: payment_id y la página de pago
+    Y-->>D: lo lleva a Khipu
 
-    D->>Y: paga
-    Y->>Y: registra el pago (append-only)
+    D->>K: paga con una transferencia desde su banco
+    K-->>D: lo devuelve al portal, sin decir cómo quedó
+    D->>Y: la página del resultado pide verificar
+    Y->>K: GET /v3/payments/{id}
+    K-->>Y: done, monto, transacción
+    Note over Y: Se aprueba solo si Khipu lo concilió<br/>y el monto y la transacción calzan.
+    Y-->>D: "Pago aprobado"
+
     Y->>R: pago.confirmado
     R->>M: la cola entrega
     M->>M: abona, y si queda en cero: deuda.saldada
     M->>X: evento firmado con HMAC
-    X-->>D: su arriendo queda en $0 en Patrimonio
+    X-->>X: lo reenvía al acreedor, que deja el contrato en $0
 ```
 
-Lo que este diagrama muestra y conviene notar: **el navegador nunca dice cuánto hay que pagar**.
-Lo pregunta ms-payments a ms-debt. Y el aviso de vuelta no viaja por el navegador tampoco.
+**El navegador nunca dice cuánto hay que pagar ni si el pago salió bien.** El monto lo pregunta
+ms-payments a ms-debt, y la aprobación la confirma ms-payments con Khipu, de servidor a servidor.
+Si el deudor cierra la ventana antes de volver, el pago igual se registra: ms-payments le pregunta
+a Khipu por los cobros abiertos cada 30 segundos. El aviso de vuelta tampoco pasa por el navegador.
+
+### Estados de una deuda
+
+```mermaid
+stateDiagram-v2
+    [*] --> open: llega con 30 días de mora o más
+    open --> repacted: el deudor acepta un convenio
+    open --> paid: paga el total
+    repacted --> paid: paga la última cuota
+    open --> disputed: el deudor reclama
+    repacted --> disputed: el deudor reclama
+    disputed --> open: la empresa reanuda el cobro
+    disputed --> repacted: reanuda, y tenía convenio
+    disputed --> withdrawn: la empresa la retira
+    open --> withdrawn: llega al día, o sale del mandato
+    repacted --> withdrawn: llega al día, o sale del mandato
+    paid --> open: la cartera siguiente trae cargos nuevos
+```
+
+Cada cambio sale como un evento hacia quien entregó la cartera: `repactacion.aceptada`,
+`pago.confirmado`, `deuda.saldada`, `deuda.disputada`, `deuda.reanudada` o `deuda.retirada`.
 
 ### Componentes
 
@@ -562,33 +674,29 @@ componente con su interfaz HTTP, su base propia y sus dependencias dibujadas.
 | Requisito | Cómo se cumple | Dónde está |
 | --- | --- | --- |
 | **Seguridad** · autenticación | El deudor entra con RUT + 6 caracteres, sin cuenta ni contraseña. Un solo uso, 24 h, 5 intentos. El alfabeto excluye `0 O 1 I L` porque el código se dicta por teléfono | `ms-auth/AuthService` |
-| **Seguridad** · sesión | El JWT dura **15 minutos** y vive en la memoria de la pestaña, no en `localStorage`. Lo que mantiene a alguien adentro es una llave de renovación de 256 bits en una cookie `HttpOnly`, `SameSite=Strict` y limitada a `/api/auth`, que ningún script de la página puede leer. Cada uso la cambia por otra; cerrar sesión la revoca **en el servidor**; y si una llave ya usada vuelve a aparecer —alguien la copió— se revoca toda la sesión | `ms-auth/SessionService`, `V2__sesiones.sql` |
-| **Seguridad** · origen | Cada freno cuenta por IP, así que la IP no se puede inventar: nginx sobrescribe `X-Forwarded-For` con la que vio, y el gateway solo le cree a sus proxies de confianza (`TRUSTED_PROXIES`). CORS acepta solo los orígenes del portal (`CORS_ORIGINS`), no `*` | `frontend/nginx.conf`, `gateway/ClienteReal` |
-| **Seguridad** · secretos | Códigos de acceso, tokens de enlace y claves de API se verifican mediante hashes. Los secretos HMAC de suscripciones sí deben recuperarse para firmar y actualmente se almacenan en `subscriptions.secret`; su protección en reposo queda pendiente para un despliegue real | `V1__esquema_inicial.sql`, `db/README.md` |
-| **Seguridad** · enumeración | "No hay código" y "código incorrecto" responden **lo mismo**, para que nadie pueda averiguar qué RUT tienen deuda | `AuthService.entrarConCodigo` |
-| **Seguridad** · autorización | Cada sesión se identifica por RUT. Un deudor ve y paga solo lo suyo; una agencia ve solo la cartera que le corresponde por mandato | `DebtService.acreedorDe` |
+| **Seguridad** · sesión | El JWT dura **15 minutos** y vive en la memoria de la pestaña, no en `localStorage`. Mantiene a la persona adentro una llave de renovación de 256 bits en una cookie `HttpOnly` y `SameSite=Strict`, que ningún script puede leer. Cada uso la cambia por otra; cerrar sesión la revoca **en el servidor**, y si una llave usada reaparece, se revoca toda la sesión | `ms-auth/SessionService`, `V2__sesiones.sql` |
+| **Seguridad** · origen | Cada freno cuenta por IP, así que la IP no se puede inventar: nginx sobrescribe `X-Forwarded-For`, y el gateway solo les cree a sus proxies (`TRUSTED_PROXIES`). CORS acepta solo los orígenes del portal (`CORS_ORIGINS`), no `*` | `frontend/nginx.conf`, `gateway/ClienteReal` |
+| **Seguridad** · secretos | Lo que solo se compara se guarda como hash: códigos, tokens de enlace, llaves de renovación y claves de API. Lo que hay que leer de vuelta —el secreto con que se firman los avisos— va **cifrado con AES-256-GCM**, con una llave fuera de la base (`CIFRADO_LLAVE`). Un secreto en claro de antes se cifra solo al arrancar | `ms-debt/config/Cifrado`, `V3__secretos_cifrados.sql` |
+| **Seguridad** · pagos | Un pago de Khipu se aprueba solo si Khipu dice que está conciliado (`done`, sin reversa) **y** el monto y la transacción calzan con el cobro. Nada de lo que traiga el navegador o el aviso se aplica: siempre se le pregunta a Khipu. El aviso además se verifica con su firma HMAC, y un pago real no se puede confirmar por el camino de la simulación | `ms-payments/PaymentService`, `KhipuClient`, `FirmaDeKhipu` |
+| **Seguridad** · enumeración | "No hay código" y "código incorrecto" responden **lo mismo**, para que nadie averigüe qué RUT tienen deuda | `AuthService.entrarConCodigo` |
+| **Seguridad** · autorización | Cada sesión se identifica por RUT. Un deudor ve, paga y reclama solo lo suyo; una agencia ve y resuelve solo la cartera de su mandato | `DebtService`, `DisputaService` |
 | **Seguridad** · integridad | Los eventos van firmados con HMAC-SHA256, caducan a los 5 minutos y se descartan si llegan repetidos | `docs/integracion/README.md` §8 |
-| **Seguridad** · superficie | De la aplicación, **solo el portal publica un puerto**. Comprobado: `curl` a 8081, 8083, 8084 y 8085 desde la máquina no obtiene respuesta. MySQL, RabbitMQ y el buzón sí publican, **a propósito**, para revisarlos en desarrollo; en un despliegue real esas tres líneas `ports:` se borran | `docker-compose.yml` |
-| **Seguridad** · contenedores | Ninguna imagen corre como root: los servicios usan el usuario `10001` y el portal la nginx sin privilegios, que escucha en el 8080 porque un proceso sin privilegios no puede tomar el 80. Las imágenes de Java llevan solo el JRE, sin compilador ni código fuente | `*/Dockerfile` |
-| **Seguridad** · entradas | Cada petición del portal entra como un tipo con sus reglas (`@NotBlank`, `@Min`, `@Pattern`...), y lo que no cumple se responde con `400` y un mensaje para la persona, antes de llegar a la lógica. Un JSON mal escrito o una ruta que no existe responden `400` y `404`, no `500` | `dto/request/`, `common/ApiExceptionHandler` |
-| **Rendimiento** · medido | Con 100 personas a la vez, **cero errores** en unas 32.000 peticiones y un p95 de 7 a 12 ms según el día (11,8 ms el 24-09). Comparada lado a lado con la versión anterior, la refactorización a DTOs y HATEOAS no cambió la latencia de los servicios; el gateway suma unos 0,3 ms. En estrés, holgado hasta 1.000 peticiones por segundo, empieza a doler hacia las 1.500 y **toca techo en unas 1.800**, donde se pone lento pero sigue sin fallar. Detalle y máquina en [`rendimiento/`](rendimiento/README.md) | `rendimiento/` |
-| **Rendimiento** · límite de peticiones | Dos capas: el gateway deja 10 por minuto en `/api/auth/**` y 120 globales por IP, y `ms-auth` bloquea diez minutos al origen que falla diez códigos. **Medido:** el gateway corta en la petición 11, se recarga solo, y lo que pasa lo frena `ms-auth` | `gateway/RateLimitFilter`, `AuthService` |
-| **Rendimiento** · consultas | Trece índices en `tb_debt` para los caminos que se usan: `ix_debt_creditor_status` (la cartera de un acreedor), `ix_debt_debtor` (lo que debe una persona), `ix_batch_creditor`. Los `UNIQUE` hacen doble trabajo: `uq_payment_gateway` evita cobrar dos veces la misma transacción y además es el índice con que se busca | `V1__esquema_inicial.sql` |
-| **Rendimiento** · memoria | La JVM lee el límite del contenedor (`MaxRAMPercentage=75`), no el de la máquina, y cada servicio tiene su tope declarado | `*/Dockerfile` |
-| **Rendimiento** · portal | La página de la empresa, que trae los gráficos, se carga de forma diferida. En el build del 29-09-2026 el JS principal fue 315,35 kB y el bloque de DataBridge 418,22 kB, antes de gzip; no representan por sí solos toda la transferencia de una sesión | `frontend/src/App.jsx` |
-| **Rendimiento** · simulador | El deslizador del plazo consulta el plan cuando lleva un segundo quieto, y guarda cada plazo ya calculado. Antes cada paso era una consulta: deslizarlo de punta a punta mandaba 18 seguidas y el gateway lo cortaba con "Demasiadas solicitudes". **Medido:** de 7 a 24 meses, una sola consulta; volver a un plazo ya visto, ninguna | `frontend/src/pages/Repact.jsx` |
-| **Usabilidad** | Tema claro (crema y verde bosque) y oscuro (negro carbón y morado): sigue al del sistema hasta que la persona elige uno, y lo recuerda. Quien pidió menos movimiento al sistema no ve animaciones. La barra de estado se anuncia como barra de progreso a los lectores de pantalla | `frontend/src/index.css`, `store/temaStore.js` |
-| **Escalabilidad** | La identidad de acceso viaja en JWT y las sesiones de renovación se persisten en `tb_auth`. El gateway mantiene sus límites por IP en memoria local: replicarlo requiere coordinar cuotas. ms-debt y ms-payments tienen tareas programadas que ejecutarían trabajo en cada réplica; también necesitan coordinación. La réplica del portal exige resolver su puerto publicado. La topología con varias instancias no se validó en esta revisión | `SessionService`, `RateLimitFilter`, `EventDispatcher`, `NotificationDispatcher` |
-| **Disponibilidad** | Los nueve contenedores declaran `healthcheck` y ninguno arranca antes que aquel del que depende. La salud de los servicios la da Actuator (`/actuator/health`), que incluye la conexión a la base: un servicio sin base no se declara sano. `restart: unless-stopped` los repone si se caen | `docker-compose.yml` |
-| **Disponibilidad** · entrega | Todo lo que sale hacia otro sistema pasa por una bandeja con reintentos (1 min, 5 min, 30 min, 2 h, 6 h, 24 h). Si DataBridge está caído, APOFYX sigue recibiendo carteras y lo pendiente se entrega solo cuando vuelve | `outbox`, `NotificationDispatcherTest` |
-| **Portabilidad** | Una orden levanta el sistema entero en cualquier máquina con Docker, sin instalar JDK, Node ni Python | `docker-compose.yml` |
-| **Mantenibilidad** | Los tres servicios tienen la misma estructura de paquetes ([§6](#cómo-está-organizado-cada-servicio)). `ddl-auto: validate` se niega a arrancar si las entidades y las tablas no calzan; Flyway versiona cada cambio de esquema | `application.properties` |
-| **Documentación** | Todos los endpoints en Swagger, con sus respuestas posibles y ejemplos reales (RUT válidos, montos en CLP y UF) | http://localhost:8080/swagger-ui.html |
-
-> **Límites conocidos.** El gateway guarda un contador por cada IP que ve y no lo olvida nunca:
-> con clientes reales eso es poco, pero en un despliegue largo convendría que expiraran. Y las
-> pruebas de carga miden lectura sobre una cartera pequeña, en una sola máquina: no dicen cómo se
-> comporta la escritura ni una tabla con cien mil deudas.
+| **Privacidad** | Ningún evento lleva datos personales del deudor. El texto que escribe al reclamar se queda en DataBridge: a la cadena viaja solo el motivo | `EventosService`, decisión I5 del contrato |
+| **Seguridad** · superficie | De la aplicación, **solo el portal publica un puerto**. MySQL, RabbitMQ y el buzón publican el suyo **a propósito**, para revisarlos en desarrollo; en un despliegue real esas líneas `ports:` se borran | `docker-compose.yml` |
+| **Seguridad** · contenedores | Ninguna imagen corre como root: los servicios usan el usuario `10001` y el portal la nginx sin privilegios. Las imágenes de Java llevan solo el JRE, sin compilador ni código fuente | `*/Dockerfile` |
+| **Seguridad** · entradas | Cada petición entra como un tipo con sus reglas (`@NotBlank`, `@Size`, `@Pattern`...), y lo que no cumple se responde con `400` y un mensaje para la persona. Un JSON mal escrito o una ruta que no existe responden `400` y `404`, no `500` | `dto/request/`, `common/ApiExceptionHandler` |
+| **Rendimiento** · medido | Con 100 personas a la vez, **cero errores** en unas 32.000 peticiones y un p95 de 7 a 12 ms según el día. En estrés, holgado hasta 1.000 peticiones por segundo; **toca techo en unas 1.800**, donde se pone lento pero no falla. Mediciones del 23 y 24 de septiembre, con máquina y detalle en [`rendimiento/`](rendimiento/README.md) | `rendimiento/` |
+| **Rendimiento** · límite de peticiones | Dos capas: el gateway deja 10 por minuto en `/api/auth/**` y 120 globales por IP, y `ms-auth` bloquea diez minutos al origen que falla diez códigos | `gateway/RateLimitFilter`, `AuthService` |
+| **Rendimiento** · consultas | Índices para los caminos que se usan: `ix_debt_creditor_status` (la cartera de un acreedor), `ix_debt_debtor` (lo que debe una persona). `uq_payment_gateway` evita cobrar dos veces la misma transacción y además es el índice con que se busca el aviso de Khipu | `V1__esquema_inicial.sql` |
+| **Rendimiento** · memoria | La JVM lee el límite del contenedor (`MaxRAMPercentage=75`), y cada servicio tiene su tope declarado | `*/Dockerfile` |
+| **Rendimiento** · portal | La página de la empresa, la de los gráficos, se carga de forma diferida: el JS principal pesa 320 kB y el de esa página 420 kB, antes de gzip | `frontend/src/App.jsx` |
+| **Usabilidad** | Tema claro (crema y verde bosque) y oscuro (carbón y morado), que sigue al del sistema hasta que la persona elige. Quien pidió menos movimiento no ve animaciones. La barra de estado se anuncia como barra de progreso a los lectores de pantalla | `frontend/src/index.css` |
+| **Disponibilidad** | Los nueve contenedores declaran `healthcheck`, y ninguno arranca antes que aquel del que depende. La salud la da Actuator, que incluye la conexión a la base. `restart: unless-stopped` los repone si se caen | `docker-compose.yml` |
+| **Disponibilidad** · entrega | Todo lo que sale hacia otro sistema pasa por una bandeja con reintentos (1 min, 5 min, 30 min, 2 h, 6 h, 24 h). Si APOFYX está caído, el aviso se entrega cuando vuelve | `outbox`, `EventDispatcher` |
+| **Escalabilidad** | La identidad viaja en JWT y las sesiones se guardan en `tb_auth`. Para varias réplicas falta coordinar dos cosas: los límites del gateway viven en la memoria de cada instancia, y las tareas programadas (recordatorios, despachadores, vencimiento de pagos) correrían en cada una. No se validó con varias instancias | `RateLimitFilter`, `EventDispatcher`, `ConciliacionKhipu` |
+| **Portabilidad** | Una orden levanta el sistema entero en cualquier máquina con Docker | `docker-compose.yml` |
+| **Mantenibilidad** | Los tres servicios tienen la misma estructura de paquetes. `ddl-auto: validate` se niega a arrancar si las entidades y las tablas no calzan | `application.properties` |
+| **Documentación** | Todos los endpoints en Swagger, con sus respuestas posibles y ejemplos reales | http://localhost:8080/swagger-ui.html |
 
 ---
 
@@ -596,53 +704,52 @@ componente con su interfaz HTTP, su base propia y sus dependencias dibujadas.
 
 ### Qué se construye
 
-| Imagen | Con qué | Tamaño |
-| --- | --- | --- |
-| `tbridge/ms-auth` · `tbridge/ms-debt` · `tbridge/ms-payments` · `tbridge/gateway` | Uno por servicio: [`ms-auth/Dockerfile`](ms-auth/Dockerfile), [`ms-debt/Dockerfile`](ms-debt/Dockerfile), [`ms-payments/Dockerfile`](ms-payments/Dockerfile), [`gateway/Dockerfile`](gateway/Dockerfile) | 563 – 616 MB |
-| `tbridge/ms-ai` | [`ms-ai/Dockerfile`](ms-ai/Dockerfile) | 280 MB |
-| `tbridge/portal` | [`frontend/Dockerfile`](frontend/Dockerfile), compila con Node y sirve con nginx | 83 MB |
+| Imagen | Con qué |
+| --- | --- |
+| `tbridge/ms-auth` · `tbridge/ms-debt` · `tbridge/ms-payments` · `tbridge/gateway` | Un Dockerfile por servicio: [`ms-auth`](ms-auth/Dockerfile), [`ms-debt`](ms-debt/Dockerfile), [`ms-payments`](ms-payments/Dockerfile), [`gateway`](gateway/Dockerfile) |
+| `tbridge/ms-ai` | [`ms-ai/Dockerfile`](ms-ai/Dockerfile) |
+| `tbridge/portal` | [`frontend/Dockerfile`](frontend/Dockerfile): compila con Node y sirve con nginx |
 
-Cada servicio de Java tiene **su propio Dockerfile** y compila solo lo suyo
-(`mvn -pl <servicio> -am`: el servicio y `common`). Se construyen desde la raíz de TB_web porque
-necesitan el `pom.xml` padre:
+Cada servicio de Java compila solo lo suyo (`mvn -pl <servicio> -am`: el servicio y `common`). Se
+construyen desde la raíz porque necesitan el `pom.xml` padre:
 
 ```powershell
 docker build -f ms-debt/Dockerfile -t tbridge/ms-debt .
 ```
 
-Son **dos etapas** —la primera compila con Maven y el JDK, la segunda se queda solo con el JRE y
-el `.jar`—, así que ni el código fuente ni el compilador viajan a la imagen final. Las
-dependencias de Maven quedan en un caché de Docker entre construcciones: se bajan una vez, no en
-cada cambio de código.
+Son **dos etapas**: la primera compila con Maven y el JDK, y la segunda se queda solo con el JRE y
+el `.jar`. Las dependencias de Maven quedan en un caché de Docker entre construcciones.
 
-El [`docker-compose.yml`](docker-compose.yml) orquesta los nueve contenedores con tres perfiles:
-sin perfil levanta solo la infraestructura, y `--profile app` levanta el sistema entero.
+El [`docker-compose.yml`](docker-compose.yml) orquesta los nueve contenedores. Sin perfil levanta
+solo la infraestructura (MySQL, RabbitMQ y el buzón); con `--profile app`, el sistema entero.
 
 ### Variables de entorno
 
 Todas tienen un valor por omisión de desarrollo, así que el sistema levanta sin configurar nada.
 Para cambiarlas, un archivo `.env` al lado del `docker-compose.yml`: [`.env.example`](.env.example)
-las trae todas, agrupadas por servicio y comentadas. El mismo `.env` lo leen los servicios cuando
-se corren con Maven.
+las trae todas, comentadas. El mismo `.env` lo leen los servicios cuando se corren con Maven.
 
 | Variable | Por omisión | Para qué |
 | --- | --- | --- |
 | `MYSQL_USER`, `MYSQL_PASSWORD`, `MYSQL_ROOT_PASSWORD` | `tbridge` / `tbridge_pass` / `rootpass` | La base |
-| `JWT_SECRET` | `tbridge-dev-secret-change-me-32chars` | Firma los JWT. **El mismo en ms-auth, ms-debt y ms-payments**, o unos no podrán verificar lo que firmó otro. Al menos 32 bytes: con menos, los servicios no arrancan |
+| `JWT_SECRET` | `tbridge-dev-secret-change-me-32chars` | Firma los JWT. **El mismo en ms-auth, ms-debt y ms-payments.** Al menos 32 bytes: con menos, los servicios no arrancan |
 | `INTERNAL_KEY` | `tbridge-internal-dev` | Autentica las llamadas entre servicios |
+| `CIFRADO_LLAVE` | `databridge-cifrado-dev-cambiar` | Cifra en la base el secreto de las suscripciones. Si se cambia, los suscritos tienen que volver a suscribirse |
 | `JWT_TTL_MINUTES` | `15` | Cuánto dura el JWT. Corto a propósito: no se puede revocar |
 | `REFRESH_TTL_HOURS` | `168` | Cuánto dura una sesión desde que se entra. Renovar no la alarga |
-| `COOKIE_SECURE` | `false` | **Encender detrás de HTTPS.** Apagado porque todo esto se sirve por HTTP, y una cookie `Secure` sobre HTTP el navegador la descarta sin avisar |
-| `CORS_ORIGINS` | los del portal, en `PORTAL_PORT` | Qué orígenes pueden hacer peticiones con credenciales al gateway |
-| `TRUSTED_PROXIES` | local y redes de Docker | En qué proxies confía el gateway para saber la IP del cliente. Si Docker creara la red fuera de `172.16–31`, hay que ajustarlo |
-| `WEBHOOK_SECRET` | `tbridge-webhook-dev` | Verifica los avisos de las pasarelas |
-| `PORTAL_PORT` | `8080` | Dónde queda el portal |
-| `PUBLIC_URL` | `http://localhost:8080` | La dirección que se escribe en los correos |
+| `COOKIE_SECURE` | `false` | **Encender detrás de HTTPS.** Una cookie `Secure` sobre HTTP el navegador la descarta sin avisar |
+| `CORS_ORIGINS` | los del portal | Qué orígenes pueden hacer peticiones con credenciales al gateway |
+| `TRUSTED_PROXIES` | local y redes de Docker | En qué proxies confía el gateway para saber la IP del cliente |
+| `WEBHOOK_SECRET` | `tbridge-webhook-dev` | Firma los enlaces de pago y verifica los avisos de las pasarelas simuladas |
+| `KHIPU_LLAVE` | vacía | La llave de API de una cuenta de cobro de Khipu. Con ella, Khipu cobra de verdad; vacía, es simulada. **Es un secreto: solo en el `.env`** |
+| `KHIPU_URL_AVISOS`, `KHIPU_SECRETO` | vacías | Con una dirección pública de DataBridge: dónde avisa Khipu, y el secreto con que se verifica su firma |
+| `KHIPU_VENCE_EN` | `30m` | Cuándo se vence un cobro de Khipu que nadie pagó |
+| `PORTAL_PORT`, `PUBLIC_URL` | `8080`, `http://localhost:8080` | Dónde queda el portal, y la dirección que va en los correos y en el retorno de Khipu |
 | `BCENTRAL_USER`, `BCENTRAL_PASS` | vacías | La UF del Banco Central. Sin ellas, se carga a mano |
 | `XAI_API_KEY` | vacía | El LLM del asistente. Sin ella, responde con reglas |
-| `MIN_MESES_IMPAGOS` | `2` | El alcance: desde cuántos meses impagos entra una deuda a cobranza. Con menos se rechaza (`bajo_umbral_mora`) |
-| `RECORDATORIO_DIAS_ANTES` | `3` | Cuántos días antes de cada cuota le llega al deudor el recordatorio. Se revisa cada mañana a las 9:00 (`RECORDATORIO_CRON`) y nunca se repite para la misma cuota |
-| `DEMO_DATOS` | `true` | Carga al arrancar la cartera de ejemplo ([§3](#para-entrar-como-deudor)). Solo agrega el deudor que falte: una base con datos propios no pierde nada. Con `false` queda registrada igual la agencia, APOFYX; cada acreedor llega con el mandato de su agencia |
+| `MIN_DIAS_MORA` | `30` | Desde cuántos días de mora del cargo impago más antiguo entra una deuda a cobranza |
+| `RECORDATORIO_DIAS_ANTES` | `3` | Cuántos días antes de cada cuota llega el recordatorio. Nunca se repite para la misma cuota |
+| `DEMO_DATOS` | `true` | Carga al arrancar la cartera de ejemplo. Solo agrega lo que falte: una base con datos propios no pierde nada |
 | `RATE_AUTH_CAPACITY`, `RATE_GLOBAL_CAPACITY` | `10` / `120` | Peticiones por minuto |
 | `EVENTS_RABBIT` | `true` en Docker, `false` con Maven | Si el aviso de pago va por RabbitMQ o por HTTP |
 | `SWAGGER_ENABLED` | `true` | Apagar la documentación, por ejemplo en producción |
@@ -655,175 +762,138 @@ para nada que no sea una demostración.**
 ## 11. Pruebas
 
 ```powershell
-.\mvnw.cmd test                                                # Java: common, gateway y los tres servicios
+.\mvnw.cmd clean test                                           # Java: common, gateway y los tres servicios
 cd ms-ai ; .venv\Scripts\python.exe -m unittest discover tests  # el asistente
 ```
 
 Cada servicio tiene sus pruebas en `src/test/java`, con la misma estructura de paquetes que el
-código: `service/` para las reglas de negocio y `controller/` para la capa web. **Ninguna necesita
-base de datos**, así que corren en segundos en cualquier equipo.
+código. **Ninguna necesita base de datos ni internet**, así que corren en segundos en cualquier
+equipo: Khipu se reemplaza por un servidor HTTP local.
 
-| Tipo | Qué cubre | Dónde |
-| --- | --- | --- |
-| **Unitarias** (JUnit 5 + Mockito) | Las reglas de cada servicio con los repositorios simulados (`@Mock`, `@InjectMocks`): que cada quien vea solo lo suyo, que el monto del cobro salga de ms-debt y no del navegador, que un pago avisado dos veces se abone una, que repactar anule las cuotas en vez de borrarlas,
-que las cuotas se paguen en orden, que solo entren deudores morosos, que un cliente al día no se cobre y cierre lo que estaba en cobranza, que el mandato registre al acreedor que no existía, que la invitación salga una vez y que su fallo no rompa la ingesta, que un convenio sobreviva a la cartera del mes siguiente y que una deuda pagada se reabra solo con cargos nuevos, la sesión revocable (rotación, robo, dos pestañas), el código de acceso, la UF, la firma de los eventos, el recordatorio (uno por cuota, sin monto ni enlace) y qué cuotas cubrió cada pago. Una prueba fija byte a byte el JSON de un evento firmado: si cambiara, APOFYX lo rechazaría | `*/src/test/java/.../service/` |
-| **De integración de la capa web** (`@WebMvcTest` + MockMvc) | Cada controlador con su seguridad, su validación y su JSON de verdad, y los servicios simulados (`@MockitoBean`): `401` sin sesión, `403` con la deuda de otro, `400` con datos malos, la forma de cada respuesta, los `_links` de HATEOAS según quién mira y con la dirección pública, la cookie de la sesión, los nombres del contrato v1 intactos, y lo que Swagger publica del contrato: la cartera en JSON y en CSV en una sola operación, y las listas de la campaña con su tipo | `*/src/test/java/.../controller/` |
-| **De seguridad** | En cada push, **CodeQL** (análisis estático de Java, JavaScript y Python), una auditoría de dependencias que rompe el build ante una vulnerabilidad alta, y Dependabot (también para las imágenes base de Docker). Con tráfico real: los dos frenos contra fuerza bruta y que una IP inventada no da un cupo nuevo | `.github/workflows/`, [`rendimiento/limite.js`](rendimiento/limite.js) |
-| **De rendimiento** (k6) | Cómo lo siente una persona (100 usuarios, p95 de 7 a 12 ms según el día) y dónde está el techo (unas 1.800 peticiones por segundo). La prueba de estrés encontró que nginx se quedaba sin puertos a las 500 por segundo; ya está arreglado | [`rendimiento/`](rendimiento/README.md) |
+> Usa `clean`. El editor de VS Code compila por su cuenta dentro de `target/`, y sin `clean`
+> Maven puede dar por buena una clase vieja.
 
-**224 pruebas en Java y 12 en Python.** Corren solas en **GitHub Actions** con cada push; las de
-rendimiento necesitan el sistema arriba y se corren a mano.
+| Tipo | Qué cubre |
+| --- | --- |
+| **Unitarias** (JUnit 5 + Mockito) | Las reglas de cada servicio con los repositorios simulados. Que cada quien vea solo lo suyo; que el monto salga de ms-debt y no del navegador; que un pago avisado dos veces se abone una; que las cuotas se paguen en orden; que solo entren deudores morosos; que un cliente al día cierre lo que estaba en cobranza; que el mandato registre al acreedor nuevo; que un convenio sobreviva al mes siguiente; el reclamo y sus dos resoluciones; el cifrado y que un secreto viejo se cifre al arrancar; la sesión revocable, el código de acceso, la UF, la firma de los eventos y el recordatorio |
+| **De Khipu** | El cliente contra un Khipu falso: crear el cobro, preguntar en qué va y sus errores. El pago conciliado, el que sigue en verificación, el rechazado, el revertido y el arrepentido; que otro monto u otra transacción no se aprueben; que un pago real no se confirme por la simulación; la consulta periódica que cierra lo pagado y vence lo abandonado, y la firma de los avisos |
+| **De la capa web** (`@WebMvcTest` + MockMvc) | Cada controlador con su seguridad, su validación y su JSON: `401` sin sesión, `403` con la deuda de otro, `400` con datos malos, los `_links` según quién mira, la cookie de la sesión y los nombres del contrato v1 intactos. El aviso de Khipu llega con el cuerpo tal como vino, porque sobre ese texto va la firma |
+| **De seguridad** | En cada push, **CodeQL** (Java, JavaScript y Python), una auditoría de dependencias que rompe el build ante una vulnerabilidad alta, y Dependabot |
+| **De rendimiento** (k6) | Cómo lo siente una persona y dónde está el techo. Se corren a mano, con el sistema arriba ([`rendimiento/`](rendimiento/README.md)) |
+
+**266 pruebas en Java y 12 en Python**, sin fallos:
+
+| Módulo | Pruebas |
+| --- | --- |
+| `common` | 18 |
+| `gateway` | 11 |
+| `ms-auth` | 40 |
+| `ms-debt` | 143 |
+| `ms-payments` | 54 |
+| `ms-ai` (Python) | 12 |
+
+Además, la cadena completa con los tres sistemas se prueba de punta a punta con un script que
+vive fuera de este repositorio, en la carpeta que reúne a los tres
+([estado](#estado-al-3-de-octubre-de-2026)).
 
 ---
 
 ## 12. Innovación
 
 **¿Qué problema resuelve?** Está en [§1](#qué-problema-resuelve): cobrar deudas chicas cuesta más
-que la deuda, y al mismo tiempo el deudor que quiere pagar se topa con un horario de oficina.
+que la deuda, y el deudor que quiere pagar se topa con un horario de oficina.
 
-**¿Qué hace diferente a la solución?** Tres cosas:
+**¿Qué hace diferente a la solución?**
 
-1. **Se entra sin cuenta.** El deudor no crea un usuario ni inventa una contraseña: escribe su
-   RUT y el código de seis caracteres que le llegó. Una cuenta más es una razón más para no
-   pagar, y una base de contraseñas más que se puede filtrar.
-2. **Tres empresas, un contrato.** La inmobiliaria, la agencia de cobranza y la plataforma de
-   pago son sistemas independientes que se hablan por un contrato versionado, no por una base
-   compartida. Sumar una empresa nueva no toca código: se registra en su agencia, entrega su
-   cartera por el mismo contrato, y el mandato la presenta a DataBridge. Y si un sistema se cae,
-   los demás siguen funcionando — probado, no supuesto.
-3. **La deuda vuelve.** Lo difícil de la cobranza tercerizada no es cobrar: es que el acreedor se
-   entere. Acá el pago viaja de vuelta, firmado, hasta dejar el contrato de arriendo en $0 sin
-   que nadie escriba un correo. Eso es lo que evita que le sigan cobrando a alguien que ya pagó.
+1. **Se entra sin cuenta.** El deudor no crea un usuario ni inventa una contraseña: escribe su RUT
+   y el código que le llegó. Una cuenta más es una razón más para no pagar, y una base de
+   contraseñas más que se puede filtrar.
+2. **Tres empresas, un contrato.** El acreedor, la agencia y la plataforma de pago son sistemas
+   independientes que se hablan por un contrato versionado, no por una base compartida. Sumar una
+   empresa no toca código: se registra en su agencia, entrega su cartera y el mandato la presenta
+   a DataBridge. Si un sistema se cae, los demás siguen funcionando.
+3. **Todo vuelve al acreedor.** Lo difícil de la cobranza tercerizada no es cobrar: es que el
+   acreedor se entere. Acá el pago viaja de vuelta, firmado, hasta dejar la deuda en $0 en su
+   sistema; y un reclamo también, para que nadie le siga cobrando a quien dice que ya pagó
+   mientras se revisa.
 
-**¿Qué valor agrega?** Al acreedor, cobranza de tickets bajos que antes no era rentable, y
-certeza de que su cartera está al día. Al deudor, poder pagar a las 11 de la noche, ver el
-detalle de lo que debe y repactar sin interés. A la agencia, una cartera que se actualiza sola.
+**¿Qué valor agrega?** Al acreedor, cobranza de montos bajos que antes no era rentable, y certeza
+de que su cartera está al día. Al deudor, pagar a cualquier hora, ver el detalle de lo que debe,
+repactar sin interés y reclamar sin llamar a nadie. A la agencia, una cartera que se actualiza
+sola.
 
 ---
 
 ## Recorrido de demostración
 
-1. **La cartera llega por API o por archivo.** APOFYX la entrega con `POST /api/v1/carteras`
-   (en Swagger: *Deudas - contrato de integracion v1*);
-   quien no tiene integración arrastra el CSV del contrato al portal. Las dos entradas usan la
-   misma ingesta: mismas validaciones, aceptación parcial e idempotencia.
-2. **La empresa entra.** En *Soy de una empresa*, `camila.reyes@apofyx.cl` pide su enlace; llega al
-   buzón de prueba. Ve la cartera que APOFYX entregó, aunque el acreedor sea Patrimonio.
+1. **La cartera llega por API o por archivo.** APOFYX la entrega con `POST /api/v1/carteras` (en
+   Swagger: *Deudas - contrato de integracion v1*); quien no tiene integración arrastra el CSV
+   del contrato al portal. Las dos entradas usan la misma ingesta.
+2. **La empresa entra.** En *Soy de una empresa*, `camila.reyes@apofyx.cl` pide su enlace, que
+   llega al buzón. Ve la cartera que APOFYX entregó, aunque el acreedor sea otro.
 3. **El deudor recibe su código solo.** Al entrar la deuda, la invitación sale a su correo, y la
-   cartera muestra *Invitado el …*. Si la perdió, el botón *Reenviar código* le manda otra. La
-   pantalla no muestra el código: quien lo viera podría entrar en su lugar.
-4. **El deudor entra** con su RUT y ese código, simula un plan, lo acepta y paga una o varias
-   cuotas, en orden. La barra de su deuda avanza: pendiente → en convenio → pago conciliado.
-5. **El pago vuelve por la cadena**: ms-payments avisa a ms-debt, ms-debt emite los eventos, y
-   APOFYX y Patrimonio los reciben.
-6. **Queda el rastro.** El deudor ve el pago en su historial, con qué cuotas cubrió, y descarga el
+   cartera muestra *Invitado el …*. La pantalla no muestra el código: quien lo viera podría entrar
+   en su lugar.
+4. **El deudor entra** con su RUT y ese código. Puede simular un plan, aceptarlo y pagar una o
+   varias cuotas, en orden.
+5. **O reclama.** *No reconozco esta deuda*, con un motivo y, si quiere, un detalle. La deuda queda
+   **En revisión**. La empresa la ve con el filtro del mismo nombre, y toca **Reanudar cobro** o
+   **Retirar**.
+6. **Paga con Khipu**, en la página de Khipu, con el banco de prueba
+   ([cómo activarlo](#para-pagar-con-khipu-de-verdad)). Sin llave, cualquiera de las tres pasarelas
+   abre la simulación.
+7. **Todo vuelve por la cadena.** ms-payments avisa a ms-debt, ms-debt emite los eventos, y APOFYX
+   y el acreedor los reciben.
+8. **Queda el rastro.** El deudor ve el pago en su historial, con qué cuotas cubrió, y descarga el
    comprobante. La empresa lo ve en *Pagos recibidos*.
 
-**Las pasarelas son simulaciones.** Webpay, Mercado Pago y Khipu aparecen con su logo oficial,
-tal como Transbank, Mercado Pago y Khipu los publican para los comercios, porque es lo que el
-deudor reconoce. Pero ningún pago sale de la demo: ms-payments simula las tres. Los logos son
-marcas de sus dueños.
+**Las marcas de las pasarelas.** Webpay, Mercado Pago y Khipu aparecen con su logo oficial, tal
+como Transbank, Mercado Pago y Khipu los publican para los comercios, porque es lo que el deudor
+reconoce. Los logos son marcas de sus dueños. Las simuladas lo dicen en pantalla: *Simulación*.
+
+**Webpay real quedó fuera de este repositorio** a propósito: la integración con Transbank la
+está haciendo otra parte del equipo, y se suma por separado.
 
 **Pagos en UF.** Usan la UF de ese día exacto, del **Banco Central**. Como la publica con un mes
-de adelanto, ms-payments la carga al arrancar y cada mañana a las 9:30. Sin credenciales, se
-carga a mano:
+de adelanto, ms-payments la carga al arrancar y cada mañana a las 9:30. Sin credenciales, se carga
+a mano:
 
 ```powershell
-$cuerpo = @{ dia = "2026-09-23"; valor = "39876.54" } | ConvertTo-Json
-Invoke-RestMethod -Method Post -Uri "http://localhost:8084/internal/uf" `
-  -Headers @{ "X-Internal-Key" = "tbridge-internal-dev" } `
-  -ContentType "application/json" -Body $cuerpo
+$cuerpo = @{ dia = "2026-10-03"; valor = "39876.54" } | ConvertTo-Json
+$cuerpo | docker compose exec -T ms-payments curl -s -X POST http://127.0.0.1:8084/internal/uf `
+  -H "X-Internal-Key: tbridge-internal-dev" -H "Content-Type: application/json" --data-binary "@-"
 ```
+
+---
+
+## Estado al 3 de octubre de 2026
+
+| Verificación | Resultado |
+| --- | --- |
+| Pruebas Java (`mvnw clean test`, JDK 25) | **266**, sin fallos |
+| Pruebas Python (`ms-ai`) | **12**, sin fallos |
+| Build del portal | Correcto, 754 módulos |
+| Cadena completa, sobre los contenedores reconstruidos | **16 de 16** comprobaciones: el cliente moroso nuevo llega desde Patrimonio, DataBridge registra al acreedor y lo invita, el deudor reclama y la disputa llega al acreedor, la agencia reanuda, el pago vuelve hasta el contrato y un lote repetido no se procesa dos veces |
+| Khipu | Contra un Khipu falso con la forma de la API v3, con los contenedores reconstruidos y en Edge: el deudor se arrepiente y el portal dice *El pago no se completó*; paga y dice *Pago aprobado*; paga y cierra la ventana sin volver, y la consulta periódica lo registra a los 27 s. En los tres casos el contrato de Patrimonio queda con lo que corresponde. **Falta** probarlo contra Khipu real, con una cuenta en modo desarrollador |
+| Reclamo en pantalla | Recorrido en Edge: el deudor reclama, la empresa lo ve con su detalle y lo retira, y el acreedor ve *Disputa aceptada* |
+| Migraciones sobre una base con datos | `V3` aplicada y el secreto existente cifrado al arrancar |
+
+**Lo que no está:**
+
+- **Webpay y Mercado Pago son simuladas.** Webpay real lo trae otra parte del equipo; Mercado Pago
+  es el mismo trabajo que Khipu: un cliente, un retorno y su confirmación.
+- **Khipu real falta probarlo con una cuenta de verdad** en modo desarrollador
+  ([cómo](#para-pagar-con-khipu-de-verdad)).
+- **WhatsApp:** el contrato admite el canal, pero los códigos salen solo por correo.
+- **Varias réplicas:** ver *Escalabilidad* en [§9](#9-requisitos-no-funcionales).
+- **Retención de datos** (decisión I12 del contrato): cuánto se guarda una deuda saldada antes de
+  anonimizarla.
+- **El frontend no tiene una suite automática:** se prueba compilando y recorriendo en el
+  navegador.
+- **Los roles del equipo** en [§4](#4-integrantes-del-equipo).
 
 ---
 
 Este repositorio es una de tres piezas:
 [**Patrimonio Inmuebles**](https://github.com/TechnicalBridge/patrimonioinmuebles) →
 [**APOFYX**](https://github.com/TechnicalBridge/APOFYX) → **DataBridge**.
-
-## Evaluación local del 29 de septiembre de 2026
-
-### Estado y evidencia
-
-DataBridge es el núcleo técnico del Capstone. Implementa ingreso, consulta de deuda, repactación,
-checkout simulado, confirmación, conciliación interna y eventos de vuelta al cliente ficticio.
-El valor que puede demostrarse es la continuidad del proceso y su trazabilidad; las cifras del
-escenario no prueban resultados comerciales con deudores reales.
-
-| Verificación | Resultado |
-| --- | --- |
-| `common` | 18 pruebas Java aprobadas |
-| `gateway` | 11 pruebas Java aprobadas |
-| `ms-auth` | 40 pruebas Java aprobadas |
-| `ms-debt` | 124 pruebas Java aprobadas |
-| `ms-payments` | 31 pruebas Java aprobadas |
-| Total Java | **224**, sin fallos, errores ni omisiones; Maven `BUILD SUCCESS` |
-| Cadena completa (`cadena.mjs --probar`) | 14 de 14 comprobaciones, con imágenes reconstruidas: el cliente moroso nuevo de Patrimonio llega, DataBridge registra al acreedor, invita al deudor, y el pago vuelve hasta el contrato |
-| `ms-ai` | **12 pruebas Python aprobadas** del motor local y formato de deuda |
-| Frontend | Build correcto; 754 módulos; salida de revisión en carpeta temporal |
-| Compose con perfil `app` | Configuración válida, 9 servicios |
-| Despliegue existente | 9 contenedores saludables; portal en 8080 respondió HTTP 200 |
-
-Maven se ejecutó con **JDK 25**. El `java` global de este equipo resolvía Java 17, por lo que
-se fijó `JAVA_HOME` solo en el proceso de prueba. No se modificó la configuración global.
-Las imágenes existentes no se reconstruyeron: su salud no certifica que incorporen todos los
-cambios del árbol local.
-
-### Lo que las pruebas demuestran y sus límites
-
-La suite Java prueba reglas y controladores con JUnit, Mockito y MockMvc. Verifica pertenencia
-de deudas, validaciones, cuotas, eventos, sesiones y respuestas HTTP sin necesitar MySQL. Esto
-no reemplaza ejecutar las migraciones y operaciones sobre el motor real. El asistente se probó
-con sus reglas locales; no se consultó un proveedor externo.
-
-Las compilaciones comprueban que el frontend puede empaquetarse. No se ejecutó una suite de
-navegador ni se midió accesibilidad. Los resultados de k6 del 23 y 24 de septiembre son
-antecedentes conservados en `rendimiento/README.md`, no mediciones nuevas de esta revisión.
-Tampoco se consultó el último resultado de GitHub Actions o CodeQL.
-
-### Fortalezas comprobables
-
-- `ms-payments` obtiene el importe y el dueño de la deuda desde `ms-debt`. El navegador no
-  define arbitrariamente el monto que el servidor acepta cobrar.
-- El estado de autenticación contempla renovación y revocación en servidor, además del JWT
-  de acceso. Las pruebas cubren rotación y reutilización indebida del token de renovación.
-- El contrato de integración agrupa datos por acreedor, mandato, campaña y lote; el receptor
-  puede rechazar deudas individualmente y responder sin duplicar una entrega.
-- Los avisos de pago y los eventos salientes quedan persistidos para su entrega posterior.
-  Los receptores deduplican; la entrega repetida forma parte del diseño.
-- Flyway y `ddl-auto=validate` hacen explícitos los cambios de esquema. `common` centraliza
-  identidad y errores, y cada servicio conserva responsabilidades distinguibles.
-- El asistente consulta las deudas con la autorización del propio deudor y carece de una
-  conexión independiente a la base. Su endpoint conversacional es de lectura.
-
-### Pendientes priorizados
-
-| Prioridad | Pendiente | Evidencia o criterio de cierre |
-| --- | --- | --- |
-| Alta para la entrega | Mantener explícita la simulación de Webpay, Mercado Pago y Khipu | No presentar el checkout de demo como integración de un proveedor real |
-| Alta para validar la versión final | Recorrer a mano la [prueba guiada](../PRUEBA-GUIADA.md) | La versión automática ya pasa; falta el recorrido con convenio, reapertura y retiro en meses siguientes |
-| Media | Probar persistencia y migraciones con MySQL además de los mocks | Arranque desde base vacía y actualización de una base previa sin pérdida |
-| Media | Actualizar `docs/plan-kanban.md` | Docker ya existe; NLP está en `ms-ai/app/services/nlp.py`; reconciliar fechas y pendientes |
-| Media | Resolver tareas periódicas y límites antes de replicar | Coordinar despachadores; el mapa de límites del gateway es local y no elimina entradas antiguas |
-| Media | Completar protección de secretos y política de datos | Secretos HMAC recuperables, usuarios por base, retención I12 y restauración de respaldo |
-| Media | Cerrar o excluir formalmente funcionalidades incompletas | `deuda.disputada` se puede suscribir, pero el portal aún no origina ese evento; métricas de entrega dependen de un proveedor de mensajería |
-| Media | Completar roles y UML que exija la entrega | Roles actuales y diagrama de clases del dominio si corresponde |
-
-Integrar pasarelas reales, WhatsApp u otros servicios no es requisito implícito para esta
-demostración: debe decidirse según el alcance final del Capstone y distinguirse de lo ya
-implementado. El análisis de sentimiento actual usa reglas; no acredita entrenamiento ni
-precisión de un modelo de aprendizaje automático.
-
-### Referencias operativas
-
-| Necesidad | Punto de partida |
-| --- | --- |
-| Entender el formato que debe enviar APOFYX | [Contrato de integración](docs/integracion/README.md) |
-| Cambiar datos persistentes | [Bases y Flyway](db/README.md), migraciones del servicio responsable |
-| Explicar capacidad y límites de medición | [Rendimiento](rendimiento/README.md) |
-| Entender decisiones respecto del plan | [Plan técnico](docs/plan-kanban.md), considerando los desajustes indicados |
-| Reproducir el conjunto desde la carpeta padre | [README de Capstone](../README.md) y [prueba guiada](../PRUEBA-GUIADA.md) |
-
-Un HTTP 200 del portal solo confirma la entrega de esa página. Para diagnosticar el backend
-hay que consultar la salud del servicio correspondiente dentro de su red o revisar su estado
-de contenedor; no debe confundirse la respuesta de la SPA con una respuesta de Actuator.

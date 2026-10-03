@@ -157,9 +157,11 @@ services:
       PORT: "8083"
       DB_NAME: tb_debt
       AUTH_URI: http://ms-auth:8081
-      #  El alcance: una deuda entra a cobranza con al menos estos meses impagos.
-      MIN_MESES_IMPAGOS: ${MIN_MESES_IMPAGOS:-2}
+      #  El alcance: una deuda entra a cobranza con al menos estos dias de mora.
+      MIN_DIAS_MORA: ${MIN_DIAS_MORA:-30}
       RECORDATORIO_DIAS_ANTES: ${RECORDATORIO_DIAS_ANTES:-3}
+      #  Cifra en la base el secreto de las suscripciones a los avisos.
+      CIFRADO_LLAVE: ${CIFRADO_LLAVE:-databridge-cifrado-dev-cambiar}
       DEMO_DATOS: ${DEMO_DATOS:-true}
       EVENTS_RABBIT: "true"
       RABBIT_HOST: rabbitmq
@@ -196,6 +198,13 @@ services:
       #  arranca igual y lo dice en su log.
       BCENTRAL_USER: ${BCENTRAL_USER:-}
       BCENTRAL_PASS: ${BCENTRAL_PASS:-}
+      #  Con llave, Khipu cobra de verdad (una cuenta de cobro en modo
+      #  desarrollador paga con DemoBank). Sin llave, queda simulada. El
+      #  deudor vuelve de Khipu a PUBLIC_URL, que viene en el bloque comun.
+      KHIPU_URL: ${KHIPU_URL:-https://payment-api.khipu.com}
+      KHIPU_LLAVE: ${KHIPU_LLAVE:-}
+      KHIPU_URL_AVISOS: ${KHIPU_URL_AVISOS:-}
+      KHIPU_SECRETO: ${KHIPU_SECRETO:-}
     healthcheck:
       test: ["CMD-SHELL", "curl -fs http://127.0.0.1:8084/actuator/health || exit 1"]
       interval: 10s

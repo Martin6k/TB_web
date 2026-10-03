@@ -31,17 +31,20 @@ public record PaymentResponse(
         Instant createdAt,
         @Schema(description = "Solo al abrir el cobro: a donde se va a pagar", nullable = true,
                 example = "http://localhost:8080/pasarela/41?sig=...")
-        String checkoutUrl
+        String checkoutUrl,
+        @Schema(description = "Si la pasarela es una simulacion. Khipu cobra de verdad cuando hay KHIPU_LLAVE",
+                example = "false")
+        boolean simulada
 ) {
 
-    public static PaymentResponse from(Payment pago) {
+    public static PaymentResponse from(Payment pago, boolean simulada) {
         return new PaymentResponse(pago.getId(), pago.getDebtId(), pago.getInstallmentId(), pago.getAmount(),
                 pago.getCurrency(), pago.getAmountClp(), pago.getUfValue(), pago.getGateway(), pago.getStatus(),
-                pago.getPaidAt(), pago.getCreatedAt(), null);
+                pago.getPaidAt(), pago.getCreatedAt(), null, simulada);
     }
 
     public PaymentResponse conEnlaceDePago(String url) {
         return new PaymentResponse(id, debtId, installmentId, amount, currency, amountClp, ufValue, gateway, status,
-                paidAt, createdAt, url);
+                paidAt, createdAt, url, simulada);
     }
 }

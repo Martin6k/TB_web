@@ -14,6 +14,14 @@ export const simularPlan = (id, meses) =>
 /** Aceptar el plan: las cuotas pendientes se reemplazan por las del plan. */
 export const repactar = (id, meses) => pedir(`/debts/${id}/repact`, { method: "POST", body: { months: meses } });
 
+/** El deudor no reconoce la deuda: queda en revision y no se cobra mientras tanto. */
+export const disputar = (id, motivo, detalle) =>
+  pedir(`/debts/${id}/disputa`, { method: "POST", body: { motivo, detalle } });
+
+/** La empresa resuelve la disputa: reanudar el cobro o retirar la deuda. */
+export const resolverDisputa = (id, resultado, nota) =>
+  pedir(`/debts/${id}/disputa/resolucion`, { method: "POST", body: { resultado, nota } });
+
 /** La empresa le hace llegar al deudor su codigo de acceso, al correo. */
 export const enviarCodigo = (id) => pedir(`/debts/${id}/codigo`, { method: "POST" });
 

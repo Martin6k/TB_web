@@ -1,5 +1,8 @@
 package com.tbridge.payments.controller;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.tbridge.common.exception.ApiError;
 import com.tbridge.common.jwt.JwtPrincipal;
 import com.tbridge.payments.assembler.PaymentModelAssembler;
@@ -19,23 +22,27 @@ import jakarta.validation.Valid;
 import org.springframework.hateoas.CollectionModel;
 import org.springframework.hateoas.EntityModel;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * Los pagos del portal, y la pagina publica de la pasarela simulada.
+ * Los pagos del portal, la pagina publica de la pasarela y el aviso de Khipu.
  */
 @RestController
 @RequestMapping("/api/payments")
 @Tag(name = "Pagos", description = "Abrir un cobro, seguirlo y ver su historia")
 public class PaymentController {
+
+    private static final ObjectMapper LECTOR = new ObjectMapper();
 
     private final PaymentService payments;
     private final PaymentModelAssembler enlaces;
@@ -121,5 +128,53 @@ public class PaymentController {
     public PaymentResponse confirm(@PathVariable Long id,
                                    @Parameter(description = "La firma del enlace de pago") @RequestParam String sig) {
         return payments.confirmPublic(id, sig);
+    }
+
+    @PostMapping("/public/{id}/verificar")
+    @Operation(summary = "Preguntarle a Khipu en que va el pago",
+            description = "Khipu devuelve al deudor a la pagina del resultado sin decir nada del pago: esa pagina "
+                    + "llama aca, y ms-payments le pregunta a Khipu. Un pago simulado o ya cerrado vuelve tal cual.")
+    @ApiResponse(responseCode = "200", description = "El pago, al dia con lo que dice Khipu")
+    @ApiResponse(responseCode = "401", description = "La firma no corresponde a ese pago",
+            content = @Content(schema = @Schema(implementation = ApiError.class)))
+    @ApiResponse(responseCode = "502", description = "Khipu no respondio",
+            content = @Content(schema = @Schema(implementation = ApiError.class)))
+    public PaymentResponse verificar(@PathVariable Long id,
+                                     @Parameter(description = "La firma del enlace de pago") @RequestParam String sig) {
+        return payments.verificar(id, sig);
+    }
+
+    @PostMapping("/public/{id}/cancelar")
+    @Operation(summary = "El deudor se arrepintio en Khipu",
+            description = "Si Khipu dice que no alcanzo a pagar, el pago queda fallido; si alcanzo, vale.")
+    @ApiResponse(responseCode = "200", description = "El pago, fallido o pagado")
+    @ApiResponse(responseCode = "401", description = "La firma no corresponde a ese pago",
+            content = @Content(schema = @Schema(implementation = ApiError.class)))
+    public PaymentResponse cancelar(@PathVariable Long id,
+                                    @Parameter(description = "La firma del enlace de pago") @RequestParam String sig) {
+        return payments.cancelar(id, sig);
+    }
+
+    @PostMapping(value = "/public/khipu/aviso", consumes = MediaType.APPLICATION_JSON_VALUE)
+    @ResponseStatus(HttpStatus.OK)
+    @Operation(summary = "El aviso de Khipu",
+            description = """
+                    Khipu avisa que un pago se concilio, firmado en `x-khipu-signature`. No se aplica lo que dice:                     se verifica la firma y se le pregunta a Khipu. Solo llega si DataBridge tiene una direccion                     publica (`KHIPU_URL_AVISOS`); en local, los pagos los concilia la consulta periodica.""")
+    @ApiResponse(responseCode = "200", description = "Recibido")
+    @ApiResponse(responseCode = "401", description = "Sin firma, o una que no calza",
+            content = @Content(schema = @Schema(implementation = ApiError.class)))
+    public void avisoDeKhipu(@RequestBody String cuerpo,
+                             @RequestHeader(name = "x-khipu-signature", required = false) String firma) {
+        payments.avisoDeKhipu(cuerpo, firma, idDelAviso(cuerpo));
+    }
+
+    /** El payment_id del aviso. Se lee aparte porque la firma va sobre el cuerpo tal como llego. */
+    private static String idDelAviso(String cuerpo) {
+        try {
+            JsonNode aviso = LECTOR.readTree(cuerpo);
+            return aviso.hasNonNull("payment_id") ? aviso.get("payment_id").asText() : null;
+        } catch (JsonProcessingException e) {
+            return null;
+        }
     }
 }

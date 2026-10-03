@@ -59,7 +59,7 @@ class PaymentControllerTest {
 
     private static PaymentResponse pago() {
         return new PaymentResponse(41L, 3L, null, new BigDecimal("410000"), Payment.Currency.CLP, 410000L, null,
-                Payment.Gateway.webpay, Payment.Status.created, null, Instant.parse("2026-09-24T12:00:00Z"), null);
+                Payment.Gateway.khipu, Payment.Status.created, null, Instant.parse("2026-09-24T12:00:00Z"), null, false);
     }
 
     @Test
@@ -169,5 +169,42 @@ class PaymentControllerTest {
                         .contentType(MediaType.APPLICATION_JSON).content("{\"paymentId\":41,\"txnId\":\"wp-1\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value(41));
+    }
+
+    @Test
+    void la_pagina_del_resultado_le_pregunta_a_khipu_sin_sesion() throws Exception {
+        when(payments.verificar(41L, "firma")).thenReturn(pago());
+        when(payments.cancelar(41L, "firma")).thenReturn(pago());
+
+        mvc.perform(post("/api/payments/public/41/verificar").param("sig", "firma"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(41));
+        mvc.perform(post("/api/payments/public/41/cancelar").param("sig", "firma"))
+                .andExpect(status().isOk());
+        verify(payments).verificar(41L, "firma");
+        verify(payments).cancelar(41L, "firma");
+    }
+
+    @Test
+    void el_aviso_de_khipu_llega_con_el_cuerpo_tal_como_vino() throws Exception {
+        String cuerpo = "{\"payment_id\": \"gqzdy6chjne9\",  \"amount\":\"1000.0000\"}";
+
+        mvc.perform(post("/api/payments/public/khipu/aviso").header("x-khipu-signature", "t=1,s=abc")
+                        .contentType(MediaType.APPLICATION_JSON).content(cuerpo))
+                .andExpect(status().isOk());
+
+        //  La firma va sobre el texto exacto: con sus espacios, sin reserializar.
+        verify(payments).avisoDeKhipu(cuerpo, "t=1,s=abc", "gqzdy6chjne9");
+    }
+
+    @Test
+    void un_aviso_de_khipu_con_firma_mala_es_401() throws Exception {
+        org.mockito.Mockito.doThrow(new ApiException(HttpStatus.UNAUTHORIZED, "Firma de Khipu invalida"))
+                .when(payments).avisoDeKhipu(any(), any(), any());
+
+        mvc.perform(post("/api/payments/public/khipu/aviso").header("x-khipu-signature", "t=1,s=mala")
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"payment_id\":\"x\"}"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.error").value("Firma de Khipu invalida"));
     }
 }

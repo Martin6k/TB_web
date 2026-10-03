@@ -6,7 +6,7 @@ const PESOS = new Intl.NumberFormat("es-CL", { style: "currency", currency: "CLP
 const UF = new Intl.NumberFormat("es-CL", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 /**
- * Un monto en su moneda. Las deudas de arriendo pueden estar en UF, y mostrar
+ * Un monto en su moneda. Un arriendo comercial o un credito pueden estar en UF, y mostrar
  * UF 38,50 como "$39" era decirle al deudor que debia otra cosa.
  */
 export function dinero(valor, moneda = "CLP") {
@@ -87,6 +87,14 @@ export function porMoneda(filas, campo) {
 export const hoyEnChile = () => new Date().toLocaleDateString("sv-SE", { timeZone: "America/Santiago" });
 
 /** Como se le dice a una persona el estado de su deuda. */
+/** Los motivos de una disputa, como los ve una persona. Los codigos son los del contrato. */
+export const MOTIVOS_DISPUTA = {
+  no_reconoce: "No reconozco esta deuda",
+  ya_pagada: "Ya la pagué",
+  monto_incorrecto: "El monto no corresponde",
+  otro: "Otro motivo",
+};
+
 export const ESTADO_DEUDA = {
   open: "Pendiente",
   repacted: "En convenio",

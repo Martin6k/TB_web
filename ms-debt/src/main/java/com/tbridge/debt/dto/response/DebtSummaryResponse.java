@@ -46,8 +46,20 @@ public record DebtSummaryResponse(
         int cuotasVencidas,
         @Schema(description = "La ultima vez que se le envio el codigo de acceso, sola (al entrar la deuda) o "
                 + "desde el portal. Solo para la empresa; vacio si nunca se le envio", nullable = true)
-        Instant codigoEnviado
+        Instant codigoEnviado,
+        @Schema(description = "Solo si la deuda esta en disputa: el motivo, lo que explico el deudor y desde cuando",
+                nullable = true)
+        Disputa disputa
 ) {
+
+    /** Por que el deudor no reconoce la deuda. */
+    @Schema(name = "DisputaDeDeuda", description = "La disputa abierta de una deuda")
+    public record Disputa(
+            @Schema(description = "no_reconoce, ya_pagada, monto_incorrecto u otro", example = "ya_pagada")
+            String motivo,
+            @Schema(nullable = true, example = "Pague agosto en la oficina el 10 de septiembre") String detalle,
+            Instant desde
+    ) {}
 
     private static final ZoneId CHILE = ZoneId.of("America/Santiago");
 
@@ -58,11 +70,16 @@ public record DebtSummaryResponse(
 
     /** Con las cuotas de la deuda: de ellas salen el saldo y el avance. */
     public static DebtSummaryResponse from(Debt deuda, List<Installment> cuotas) {
-        return from(deuda, cuotas, null);
+        return from(deuda, cuotas, null, null);
     }
 
     /** Para la empresa, ademas, cuando se le envio el codigo al deudor. */
     public static DebtSummaryResponse from(Debt deuda, List<Installment> cuotas, Instant codigoEnviado) {
+        return from(deuda, cuotas, codigoEnviado, null);
+    }
+
+    public static DebtSummaryResponse from(Debt deuda, List<Installment> cuotas, Instant codigoEnviado,
+                                           Disputa disputa) {
         BigDecimal saldo = suma(cuotas, Installment.Status.pending);
         //  Lo pagado es lo que se pago por DataBridge. No sale de restar el saldo
         //  al monto original: cuando el acreedor actualiza la deuda, su monto ya
@@ -99,6 +116,7 @@ public record DebtSummaryResponse(
                 vigentes,
                 conConvenio,
                 vencidas,
-                codigoEnviado);
+                codigoEnviado,
+                deuda.getStatus() == Debt.Status.disputed ? disputa : null);
     }
 }

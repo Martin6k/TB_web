@@ -31,7 +31,7 @@ export default function PagosRecibidos() {
 
   function exportar() {
     descargarCsv("pagos-recibidos.csv",
-      ["Fecha", "Deudor", "RUT", "Contrato", "Acreedor", "Que pago", "Medio", "Operacion", "Moneda", "Monto", "Pesos"],
+      ["Fecha", "Deudor", "RUT", "Referencia", "Acreedor", "Que pago", "Medio", "Operacion", "Moneda", "Monto", "Pesos"],
       visibles.map((p) => [new Date(p.pagadoEn).toLocaleString("es-CL"), p.deudor, rutLegible(p.deudorRut),
         p.externalId, p.acreedor, queSePago(p), nombreDePasarela(p.pasarela), p.referencia, p.moneda,
         montoParaExcel(p.monto, p.moneda), p.montoClp ?? ""]));
@@ -81,7 +81,7 @@ export default function PagosRecibidos() {
             ))}
           </div>
           <input className="buscador" value={buscar} onChange={(e) => setBuscar(e.target.value)}
-                 placeholder="Buscar por deudor, RUT o contrato" aria-label="Buscar" />
+                 placeholder="Buscar por deudor, RUT o referencia" aria-label="Buscar" />
         </div>
         {visibles.length === 0 ? (
           <div className="empty">{pagos.length ? "Ningún pago calza con el filtro." : "Todavía no entra ningún pago."}</div>
@@ -103,7 +103,7 @@ export default function PagosRecibidos() {
                   <tr key={p.id}>
                     <td>{fechaHora(p.pagadoEn)}</td>
                     <td>{p.deudor}<span className="sub">{rutLegible(p.deudorRut)}</span></td>
-                    <td>{queSePago(p)}<span className="sub">Contrato {p.externalId}</span></td>
+                    <td>{queSePago(p)}<span className="sub">Ref. {p.externalId}</span></td>
                     <td><LogoPasarela id={p.pasarela} alto={16} /></td>
                     <td className="num">
                       {dinero(p.monto, p.moneda)}

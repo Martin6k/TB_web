@@ -62,7 +62,7 @@ public class CargaService {
                         campanas.findByAgencyAndCreditorOrderByStartsOnDesc(organizacion, mandato.getCreditor())));
             }
         }
-        return new OpcionesCargaResponse(organizacion.getTradeName(), acreedores, ingesta.minMesesImpagos());
+        return new OpcionesCargaResponse(organizacion.getTradeName(), acreedores, ingesta.minDiasMora());
     }
 
     @Transactional

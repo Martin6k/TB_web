@@ -15,9 +15,9 @@ import java.util.List;
 /**
  * Una deuda completa: lo de la lista, mas lo que la compone.
  *
- * <p>Los cargos son el desglose con que llego (los meses de arriendo); las
- * cuotas, lo que hay que pagar (una sola sin repactar); la historia, cada cosa
- * que le paso.
+ * <p>Los cargos son el desglose con que llego (los meses de arriendo, los
+ * aranceles, el tratamiento); las cuotas, lo que hay que pagar (una sola sin
+ * repactar); la historia, cada cosa que le paso.
  */
 @Schema(description = "Una deuda con sus cargos, sus cuotas y su historia")
 public record DebtDetailResponse(

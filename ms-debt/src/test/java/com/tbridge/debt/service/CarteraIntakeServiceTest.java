@@ -48,8 +48,10 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * El alcance de DataBridge: solo deudores morosos. Una deuda entra con al
- * menos dos meses impagos; una que ya esta en gestion puede volver con menos.
+ * El alcance de DataBridge: solo deudores morosos. Una deuda entra cuando su
+ * cargo impago mas antiguo lleva al menos 30 dias vencido, sea un arriendo
+ * mensual o una boleta de un solo cargo; una que ya esta en gestion puede
+ * volver con menos.
  */
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
@@ -74,7 +76,7 @@ class CarteraIntakeServiceTest {
     @BeforeEach
     void preparar() {
         servicio = new CarteraIntakeService(organizations, mandates, campaigns, batches, debtors, debts,
-                charges, installments, events, json, eventos, avisos, 2);
+                charges, installments, events, json, eventos, avisos, 30);
 
         //  Patrimonio entrega lo suyo: sin agencia, no hace falta mandato.
         patrimonio = new Organization();
@@ -121,11 +123,13 @@ class CarteraIntakeServiceTest {
     }
 
     @Test
-    void con_un_solo_mes_impago_todavia_no_es_morosa_y_no_entra() throws Exception {
+    void con_menos_de_30_dias_de_mora_todavia_no_es_morosa_y_no_entra() throws Exception {
         ResultadoDeuda resultado = recibir(cartera(cargo("Arriendo septiembre", "2026-09", "2026-09-05")));
 
         assertEquals("rechazada", resultado.resultado());
         assertEquals("bajo_umbral_mora", resultado.errores().getFirst().codigo());
+        assertEquals("Tiene 13 dias de mora: DataBridge recibe deudas desde 30 dias de mora",
+                resultado.errores().getFirst().mensaje());
         verify(debts, never()).save(any());
     }
 
@@ -140,17 +144,37 @@ class CarteraIntakeServiceTest {
     }
 
     @Test
-    void el_arriendo_y_el_gasto_comun_del_mismo_mes_son_un_solo_mes() throws Exception {
+    void el_umbral_se_cumple_justo_a_los_30_dias() throws Exception {
+        assertEquals("registrada", recibir(carteraAl("2026-09-18",
+                cargo("Arriendo agosto", "2026-08", "2026-08-19"))).resultado());
+        assertEquals("rechazada", recibir(carteraAl("2026-09-17",
+                cargo("Arriendo agosto", "2026-08", "2026-08-19"))).resultado());
+    }
+
+    @Test
+    void una_deuda_de_un_solo_cargo_con_mora_entra_aunque_no_sea_mensual() throws Exception {
+        //  Un tratamiento dental o una boleta de clinica: un cargo, sin meses.
+        //  Con la regla de meses impagos se rechazaba aunque llevara 75 dias.
+        ResultadoDeuda resultado = recibir(cartera(cargo("Tratamiento de ortodoncia", "", "2026-07-05", 890000)));
+
+        assertEquals("registrada", resultado.resultado());
+        assertEquals(75L, resultado.moraDias());
+    }
+
+    @Test
+    void cuenta_el_cargo_mas_antiguo_y_no_cuantos_cargos_hay() throws Exception {
+        //  Tres cargos recientes no hacen moroso a nadie: el mas antiguo vencio hace 13 dias.
         ResultadoDeuda resultado = recibir(cartera(
                 cargo("Arriendo septiembre", "2026-09", "2026-09-05"),
-                cargo("Gasto comun septiembre", "2026-09", "2026-09-10")));
+                cargo("Gasto comun septiembre", "2026-09", "2026-09-10"),
+                cargo("Multa por atraso", "2026-09", "2026-09-15")));
 
         assertEquals("rechazada", resultado.resultado());
         assertEquals("bajo_umbral_mora", resultado.errores().getFirst().codigo());
     }
 
     @Test
-    void una_deuda_en_gestion_puede_volver_con_un_solo_mes() throws Exception {
+    void una_deuda_en_gestion_puede_volver_con_poca_mora() throws Exception {
         //  El arrendatario pago agosto en la oficina y Patrimonio manda el
         //  saldo menor. Rechazarlo dejaria a DataBridge cobrando lo que ya no
         //  se debe.
@@ -298,7 +322,7 @@ class CarteraIntakeServiceTest {
     }
 
     @Test
-    void una_deuda_pagada_que_vuelve_con_un_solo_mes_todavia_no_entra() throws Exception {
+    void una_deuda_pagada_que_vuelve_con_poca_mora_todavia_no_entra() throws Exception {
         Debt deuda = existente(Debt.Status.paid);
         pagadaHastaSeptiembre(deuda);
 

@@ -75,12 +75,17 @@ public class DebtModelAssembler implements RepresentationModelAssembler<DebtSumm
             if (conSaldo) {
                 enlaces.add(BasicLinkBuilder.linkToCurrentMapping()
                         .slash("api").slash("payments").slash("checkout").withRel("pagar"));
+                enlaces.add(linkTo(DebtController.class).slash(id).slash("disputa").withRel("disputar"));
             }
         }
         if (SesionActual.esEmpresa() && conSaldo) {
             //  Por ruta y no con methodOn: codigo() devuelve un record, que es
             //  final, y methodOn necesita poder heredar del tipo que se devuelve.
             enlaces.add(linkTo(DebtController.class).slash(id).slash("codigo").withRel("enviar-codigo"));
+        }
+        if (SesionActual.esEmpresa() && estado == Debt.Status.disputed) {
+            enlaces.add(linkTo(DebtController.class).slash(id).slash("disputa").slash("resolucion")
+                    .withRel("resolver-disputa"));
         }
         if (estado == Debt.Status.paid) {
             enlaces.add(linkTo(methodOn(DebtController.class).certificate(null, id)).withRel("certificado"));

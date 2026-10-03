@@ -8,6 +8,8 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 import java.time.Instant;
 
@@ -23,9 +25,9 @@ import java.time.Instant;
  * con firma invalida NO se aplica, pero se guarda igual: alguien mandando
  * avisos falsos es algo que hay que poder ver.
  *
- * <p>La tabla tiene ademas {@code gateway_payload}, para guardar el aviso
- * crudo de una pasarela real. Con las pasarelas simuladas no hay aviso que
- * guardar, asi que esta entidad no la mapea y la columna queda en NULL.
+ * <p><b>gatewayPayload</b> guarda la respuesta cruda de una pasarela real
+ * (lo que dijo Khipu del pago), tal como llego: es lo que se mira al conciliar
+ * con la cartola. Con las pasarelas simuladas queda en NULL.
  */
 @Entity
 @Table(name = "payment_events")
@@ -53,6 +55,10 @@ public class PaymentEvent {
     @Column(name = "signature_ok")
     private Boolean signatureOk;
 
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "gateway_payload")
+    private String gatewayPayload;
+
     @Column(name = "occurred_at", nullable = false)
     private Instant occurredAt = Instant.now();
 
@@ -74,6 +80,16 @@ public class PaymentEvent {
     public PaymentEvent conFirma(Boolean valida) {
         this.signatureOk = valida;
         return this;
+    }
+
+    /** La respuesta de la pasarela, en JSON. */
+    public PaymentEvent conRespuesta(String json) {
+        this.gatewayPayload = json;
+        return this;
+    }
+
+    public String getGatewayPayload() {
+        return gatewayPayload;
     }
 
     public Long getId() {

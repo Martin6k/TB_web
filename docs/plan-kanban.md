@@ -5,7 +5,7 @@ Este documento contrasta lo construido con el *Plan de Trabajo Kanban y Arquitec
 con `git checkout 73f488e -- "Proyecto_Capstone_Kanban_Arquitectura (1).pdf"`). Cada tarea del
 backlog dice dónde quedó; cada decisión que se aparta del plan dice por qué.
 
-Estado al 22-09-2026.
+Estado al 02-10-2026.
 
 ## Resumen
 
@@ -125,14 +125,27 @@ El plan describe dos plataformas. El proyecto las conecta con dos sistemas más,
 tres empresas chilenas:
 
 ```
-Patrimonio Inmuebles  ──cartera──►  APOFYX  ──cartera──►  DataBridge
-(inmobiliaria)        ◄──eventos──  (cobranza) ◄──eventos──  (pagos)
+El acreedor              ──cartera──►  APOFYX      ──cartera──►  DataBridge
+(Patrimonio, en la demo) ◄──eventos──  (cobranza)  ◄──eventos──  (pagos)
 ```
 
 Cada sistema funciona solo y se conecta con los demás únicamente por el contrato versionado de
-`docs/integracion/`. La cadena completa se verificó de punta a punta con los tres sistemas arriba
-(71 comprobaciones, 24-09-2026); cada servicio la cubre además con sus pruebas unitarias y de
-controlador.
+`docs/integracion/`. La cadena completa se verifica de punta a punta con `node cadena.mjs --probar`
+(14 comprobaciones), y cada servicio la cubre además con sus pruebas unitarias y de controlador.
+
+Lo que se sumó después:
+
+- **Cualquier rubro.** DataBridge no es de inmobiliarias: cobra arriendos, aranceles, tratamientos
+  o planes mensuales. La regla de moroso se mide en días de mora del cargo más antiguo (30, por
+  omisión) y no en meses impagos, así que una deuda de un solo cargo también entra. La demo trae
+  tres acreedores de rubros distintos.
+- **Integración sin configuración.** Un acreedor nuevo se registra en su agencia, y el mandato de
+  la agencia lo presenta a DataBridge. Las conexiones se hacen desde las pantallas, comprobando la
+  clave con `GET /api/v1/cuenta`.
+- **Invitación automática.** Al entrar una deuda, el deudor recibe solo su código de acceso; la
+  agencia lo puede reenviar desde el portal.
+- **Docker completo.** Cada servicio tiene su imagen, y el sistema entero se levanta con
+  `docker compose --profile app up -d --wait`.
 
 ## Pendiente
 
@@ -140,7 +153,3 @@ controlador.
 - Medir la entrega de los mensajes (`entregados`, `respuestas`, `bajas` del evento
   `campana.avance`): depende del proveedor de mensajería, que todavía no existe.
 - El flujo de disputa en el portal, y con él el evento `deuda.disputada`.
-- Enviar el código de acceso automáticamente al llegar la cartera; hoy lo envía el personal desde el
-  portal.
-- Imágenes de Docker para los servicios; hoy Docker levanta solo las bases, RabbitMQ y el buzón de
-  prueba.
