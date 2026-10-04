@@ -314,14 +314,12 @@ código.
 
 ## 4. Integrantes del equipo
 
-> **⚠ POR COMPLETAR ANTES DE ENTREGAR.** El equipo tiene que llenar la columna de rol.
-
 | Integrante | Rol |
 | --- | --- |
-| Pedro Campos | |
-| Martín Gutiérrez | |
-| Flavio Henríquez | |
-| Esteban Maino | |
+| Pedro Campos | Team worker |
+| Martín Gutiérrez | Product Owner |
+| Flavio Henríquez | Team Worker |
+| Esteban Maino | Scrum master |
 
 ---
 
