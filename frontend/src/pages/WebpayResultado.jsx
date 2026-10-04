@@ -49,13 +49,6 @@ export default function WebpayResultado() {
               <Link className="btn btn-primary btn-block" to="/app">
                 Ver mis deudas actualizadas
               </Link>
-              <button
-                type="button"
-                className="btn btn-ghost btn-block btn-sm"
-                onClick={() => window.close()}
-              >
-                Cerrar esta ventana
-              </button>
             </div>
           </div>
         ) : esCancelado ? (

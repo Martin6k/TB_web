@@ -62,7 +62,7 @@ class PaymentServiceTest {
 
     @BeforeEach
     void preparar() {
-        servicio = new PaymentService(payments, eventos, avisos, firmas, deudas, uf, webpay, "http://localhost:8080/");
+        servicio = new PaymentService(payments, eventos, avisos, firmas, deudas, uf, webpay, "http://localhost:8080/", "http://localhost:8082/");
         when(payments.save(any())).thenAnswer(llamada -> {
             Payment pago = llamada.getArgument(0);
             if (pago.getId() == null) {

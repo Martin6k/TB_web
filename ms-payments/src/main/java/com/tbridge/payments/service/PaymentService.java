@@ -55,6 +55,7 @@ public class PaymentService {
     private final UfService uf;
     private final WebpayClient webpay;
     private final String publicUrl;
+    private final String gatewayUrl;
 
     public record WebpayCommitResult(PaymentResponse payment, boolean success, String message) {}
 
@@ -66,7 +67,8 @@ public class PaymentService {
             DebtClient deudas,
             UfService uf,
             WebpayClient webpay,
-            @Value("${app.public-url}") String publicUrl
+            @Value("${app.public-url}") String publicUrl,
+            @Value("${app.gateway-url}") String gatewayUrl
     ) {
         this.payments = payments;
         this.eventos = eventos;
@@ -76,6 +78,7 @@ public class PaymentService {
         this.uf = uf;
         this.webpay = webpay;
         this.publicUrl = publicUrl.replaceAll("/$", "");
+        this.gatewayUrl = gatewayUrl.replaceAll("/$", "");
     }
 
     // ------------------------------------------------------------------
@@ -124,7 +127,7 @@ public class PaymentService {
             // Integración real Transbank Webpay Plus (Ambiente TEST)
             String buyOrder = "ORD" + pago.getId() + "T" + (System.currentTimeMillis() % 100000);
             String sessionId = "SESS" + pago.getId();
-            String returnUrl = publicUrl + "/api/payments/webpay/return";
+            String returnUrl = gatewayUrl + "/api/payments/webpay/return";
             com.tbridge.payments.dto.gateway.WebpayCreateResponse webpayResp = webpay.createTransaction(
                     buyOrder,
                     sessionId,

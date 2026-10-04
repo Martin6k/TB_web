@@ -139,7 +139,7 @@ public class PaymentController {
     @RequestMapping(value = "/webpay/return", method = {RequestMethod.GET, RequestMethod.POST})
     @Operation(summary = "Retorno desde Transbank Webpay",
             description = "Punto al que Transbank redirige al usuario con token_ws o TBK_TOKEN tras completar o anular el pago.")
-    public org.springframework.http.ResponseEntity<String> webpayReturn(
+    public org.springframework.http.ResponseEntity<Void> webpayReturn(
             @RequestParam(name = "token_ws", required = false) String tokenWs,
             @RequestParam(name = "TBK_TOKEN", required = false) String tbkToken,
             @RequestParam(name = "tbk_token", required = false) String tbkTokenLower) {
@@ -163,29 +163,9 @@ public class PaymentController {
                     + UriUtils.encode(e.getMessage(), StandardCharsets.UTF_8);
         }
 
-        String html = """
-                <!DOCTYPE html>
-                <html lang="es">
-                <head>
-                    <meta charset="UTF-8">
-                    <meta http-equiv="refresh" content="0;url=%s">
-                    <title>Redirigiendo...</title>
-                    <script>
-                        window.location.replace("%s");
-                    </script>
-                </head>
-                <body style="font-family: sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #f8fafc;">
-                    <div style="text-align: center;">
-                        <h2>Procesando pago Transbank...</h2>
-                        <p>Redirigiendo a tu comprobante. Si no eres redirigido, <a href="%s">haz clic aqu&iacute;</a>.</p>
-                    </div>
-                </body>
-                </html>
-                """.formatted(targetUrl, targetUrl, targetUrl);
-
-        return org.springframework.http.ResponseEntity.ok()
-                .contentType(org.springframework.http.MediaType.TEXT_HTML)
-                .body(html);
+        return org.springframework.http.ResponseEntity.status(org.springframework.http.HttpStatus.SEE_OTHER)
+                .location(java.net.URI.create(targetUrl))
+                .build();
     }
 
     @PostMapping("/webpay/commit")

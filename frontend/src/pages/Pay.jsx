@@ -90,12 +90,8 @@ export default function Pay() {
       const cuotas = enConvenio ? elegidas.map((c) => c.id) : null;
       const data = await abrirCobro(Number(id), cuotas, pasarela);
       setPago(data);
-      // Intentar abrir en nueva pestaña/ventana
-      const popup = window.open(data.checkoutUrl, "_blank");
-      if (!popup || popup.closed || typeof popup.closed === "undefined") {
-        // Si el navegador bloquea la ventana emergente, redirigir en la misma pestaña
-        window.location.href = data.checkoutUrl;
-      }
+      // Redirigir en la misma pestaña a la pasarela elegida
+      window.location.href = data.checkoutUrl;
     } catch (err) {
       setError(err.message);
     } finally {
@@ -249,8 +245,6 @@ export default function Pay() {
                 <div style={{ marginTop: 14, display: "grid", gap: 10 }}>
                   <a
                     href={pago.checkoutUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
                     className="btn btn-primary btn-block"
                   >
                     Ir a pagar en {pasarela === "webpay" ? "Transbank Webpay" : "la Pasarela"} &rarr;

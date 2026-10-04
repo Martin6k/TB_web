@@ -170,4 +170,15 @@ class PaymentControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value(41));
     }
+
+    @Test
+    void retorno_de_webpay_redirige_a_la_pantalla_de_resultado() throws Exception {
+        when(payments.confirmWebpay("token123", null))
+                .thenReturn(new PaymentService.WebpayCommitResult(pago(), true, "Aprobado"));
+
+        mvc.perform(post("/api/payments/webpay/return").param("token_ws", "token123"))
+                .andExpect(status().isSeeOther())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.header().string(
+                        "Location", org.hamcrest.Matchers.containsString("/pasarela/webpay/resultado?status=approved")));
+    }
 }
