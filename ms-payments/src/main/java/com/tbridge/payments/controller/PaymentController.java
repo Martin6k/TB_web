@@ -23,6 +23,7 @@ import org.springframework.hateoas.CollectionModel;
 import org.springframework.hateoas.EntityModel;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -30,19 +31,16 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.web.bind.annotation.RequestMethod;
-import org.springframework.web.servlet.view.RedirectView;
-import org.springframework.web.util.UriUtils;
-
-import java.nio.charset.StandardCharsets;
+import java.net.URI;
 
 /**
- * Los pagos del portal, la integracion de Webpay y la pagina publica de la pasarela simulada.
+ * Los pagos del portal, la pagina publica de la pasarela, la ida y vuelta de
+ * Webpay y el aviso de Khipu.
  */
 @RestController
 @RequestMapping("/api/payments")
@@ -53,16 +51,10 @@ public class PaymentController {
 
     private final PaymentService payments;
     private final PaymentModelAssembler enlaces;
-    private final String publicUrl;
 
-    public PaymentController(
-            PaymentService payments,
-            PaymentModelAssembler enlaces,
-            @Value("${app.public-url}") String publicUrl
-    ) {
+    public PaymentController(PaymentService payments, PaymentModelAssembler enlaces) {
         this.payments = payments;
         this.enlaces = enlaces;
-        this.publicUrl = publicUrl.replaceAll("/$", "");
     }
 
     @PostMapping("/checkout")
@@ -143,41 +135,77 @@ public class PaymentController {
         return payments.confirmPublic(id, sig);
     }
 
-    @RequestMapping(value = "/webpay/return", method = {RequestMethod.GET, RequestMethod.POST})
-    @Operation(summary = "Retorno desde Transbank Webpay",
-            description = "Punto al que Transbank redirige al usuario con token_ws o TBK_TOKEN tras completar o anular el pago.")
-    public org.springframework.http.ResponseEntity<Void> webpayReturn(
+    @GetMapping(value = "/public/{id}/webpay", produces = MediaType.TEXT_HTML_VALUE)
+    @Operation(summary = "Ir a pagar a Webpay",
+            description = "Una pagina que envia sola el formulario con el `token_ws` a Webpay, como pide Transbank. "
+                    + "Es el `checkoutUrl` de un pago con Webpay.")
+    @ApiResponse(responseCode = "200", description = "La pagina que lleva a Webpay")
+    @ApiResponse(responseCode = "401", description = "La firma no corresponde a ese pago",
+            content = @Content(schema = @Schema(implementation = ApiError.class)))
+    public String webpay(@PathVariable Long id,
+                         @Parameter(description = "La firma del enlace de pago") @RequestParam String sig) {
+        return payments.paginaWebpay(id, sig);
+    }
+
+    @RequestMapping(value = "/public/webpay/retorno", method = {RequestMethod.GET, RequestMethod.POST})
+    @Operation(summary = "La vuelta desde Webpay",
+            description = """
+                    Webpay devuelve aca al deudor. Con `token_ws` (pago) se confirma la transaccion con Transbank;                     con `TBK_TOKEN` (anulo) o solo `TBK_ORDEN_COMPRA` (se le acabo el tiempo) el pago queda                     fallido. Responde con una redireccion a la pagina del resultado.""")
+    @ApiResponse(responseCode = "302", description = "A la pagina del resultado del pago")
+    public ResponseEntity<Void> retornoWebpay(
             @RequestParam(name = "token_ws", required = false) String tokenWs,
             @RequestParam(name = "TBK_TOKEN", required = false) String tbkToken,
-            @RequestParam(name = "tbk_token", required = false) String tbkTokenLower) {
-        String token = tokenWs != null && !tokenWs.isBlank() ? tokenWs : null;
-        String aborted = tbkToken != null && !tbkToken.isBlank() ? tbkToken : tbkTokenLower;
-
-        String targetUrl;
-        try {
-            PaymentService.WebpayCommitResult result = payments.confirmWebpay(token, aborted);
-            if (result.success() && result.payment() != null) {
-                targetUrl = publicUrl + "/pasarela/webpay/resultado?status=approved&id="
-                        + result.payment().id() + "&debtId=" + result.payment().debtId()
-                        + "&amount=" + result.payment().amount() + "&currency=" + result.payment().currency();
-            } else {
-                Long debtId = result.payment() != null ? result.payment().debtId() : null;
-                targetUrl = publicUrl + "/pasarela/webpay/resultado?status=rejected"
-                        + (debtId != null ? "&debtId=" + debtId : "");
-            }
-        } catch (Exception e) {
-            targetUrl = publicUrl + "/pasarela/webpay/resultado?status=error&error="
-                    + UriUtils.encode(e.getMessage(), StandardCharsets.UTF_8);
-        }
-
-        return org.springframework.http.ResponseEntity.status(org.springframework.http.HttpStatus.SEE_OTHER)
-                .location(java.net.URI.create(targetUrl))
+            @RequestParam(name = "TBK_ORDEN_COMPRA", required = false) String ordenDeCompra) {
+        return ResponseEntity.status(HttpStatus.FOUND)
+                .location(URI.create(payments.retornoWebpay(tokenWs, tbkToken, ordenDeCompra)))
                 .build();
     }
 
-    @PostMapping("/webpay/commit")
-    @Operation(summary = "Confirmar token Webpay manualmente via API")
-    public PaymentResponse webpayCommit(@RequestParam String token) {
-        return payments.confirmWebpay(token, null).payment();
+    @PostMapping("/public/{id}/verificar")
+    @Operation(summary = "Preguntarle a Khipu en que va el pago",
+            description = "Khipu devuelve al deudor a la pagina del resultado sin decir nada del pago: esa pagina "
+                    + "llama aca, y ms-payments le pregunta a Khipu. Un pago simulado o ya cerrado vuelve tal cual.")
+    @ApiResponse(responseCode = "200", description = "El pago, al dia con lo que dice Khipu")
+    @ApiResponse(responseCode = "401", description = "La firma no corresponde a ese pago",
+            content = @Content(schema = @Schema(implementation = ApiError.class)))
+    @ApiResponse(responseCode = "502", description = "Khipu no respondio",
+            content = @Content(schema = @Schema(implementation = ApiError.class)))
+    public PaymentResponse verificar(@PathVariable Long id,
+                                     @Parameter(description = "La firma del enlace de pago") @RequestParam String sig) {
+        return payments.verificar(id, sig);
+    }
+
+    @PostMapping("/public/{id}/cancelar")
+    @Operation(summary = "El deudor se arrepintio en Khipu",
+            description = "Si Khipu dice que no alcanzo a pagar, el pago queda fallido; si alcanzo, vale.")
+    @ApiResponse(responseCode = "200", description = "El pago, fallido o pagado")
+    @ApiResponse(responseCode = "401", description = "La firma no corresponde a ese pago",
+            content = @Content(schema = @Schema(implementation = ApiError.class)))
+    public PaymentResponse cancelar(@PathVariable Long id,
+                                    @Parameter(description = "La firma del enlace de pago") @RequestParam String sig) {
+        return payments.cancelar(id, sig);
+    }
+
+    @PostMapping(value = "/public/khipu/aviso", consumes = MediaType.APPLICATION_JSON_VALUE)
+    @ResponseStatus(HttpStatus.OK)
+    @Operation(summary = "El aviso de Khipu",
+            description = """
+                    Khipu avisa que un pago se concilio, firmado en `x-khipu-signature`. No se aplica lo que dice:                     se verifica la firma y se le pregunta a Khipu. Solo llega si DataBridge tiene una direccion                     publica (`KHIPU_URL_AVISOS`); en local, los pagos los concilia la consulta periodica.""")
+    @ApiResponse(responseCode = "200", description = "Recibido")
+    @ApiResponse(responseCode = "401", description = "Sin firma, o una que no calza",
+            content = @Content(schema = @Schema(implementation = ApiError.class)))
+    public void avisoDeKhipu(@RequestBody String cuerpo,
+                             @RequestHeader(name = "x-khipu-signature", required = false) String firma) {
+        payments.avisoDeKhipu(cuerpo, firma, idDelAviso(cuerpo));
+    }
+
+    /** El payment_id del aviso. Se lee aparte porque la firma va sobre el cuerpo tal como llego. */
+    private static String idDelAviso(String cuerpo) {
+        try {
+            JsonNode aviso = LECTOR.readTree(cuerpo);
+            return aviso.hasNonNull("payment_id") ? aviso.get("payment_id").asText() : null;
+        } catch (JsonProcessingException e) {
+            return null;
+        }
     }
 }

@@ -11,7 +11,11 @@ __pycache__/
 *.pyc
 .venv/
 venv/
+
+# Notas locales de cada uno: no se versionan.
 api_transbank.md
 Conexion_MS.md
+todolisto.md
+
 # Notas locales de commit: no se versionan.
 COMMIT.txt

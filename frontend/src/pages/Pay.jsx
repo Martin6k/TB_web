@@ -106,8 +106,7 @@ export default function Pay() {
       const cuotas = enConvenio ? elegidas.map((c) => c.id) : null;
       const data = await abrirCobro(Number(id), cuotas, pasarela);
       setPago(data);
-      // Redirigir en la misma pestaña a la pasarela elegida
-      window.location.href = data.checkoutUrl;
+      window.open(data.checkoutUrl, "_blank", "noopener,width=480,height=720");
     } catch (err) {
       setError(err.message);
     } finally {
@@ -257,18 +256,21 @@ export default function Pay() {
               <button className="btn btn-primary btn-block" disabled={busy || monto <= 0 || !!pago} onClick={pagar}>
                 {busy ? <><span className="girando" /> Abriendo…</> : <>Pagar {dinero(monto, moneda)} <IconoFlecha size={16} /></>}
               </button>
-              {pago ? (
-                <div style={{ marginTop: 14, display: "grid", gap: 10 }}>
-                  <a
-                    href={pago.checkoutUrl}
-                    className="btn btn-primary btn-block"
-                  >
-                    Ir a pagar en {pasarela === "webpay" ? "Transbank Webpay" : "la Pasarela"} &rarr;
-                  </a>
-                  <div className="esperando" style={{ justifyContent: "center" }}>
-                    <span className="girando" />
-                    Esperando la confirmación de la pasarela…
-                  </div>
+              {pago?.status === "failed" || pago?.status === "expired" ? (
+                <div className="error">
+                  El pago no se completó en {nombreDePasarela(pago.gateway)}:{" "}
+                  {pago.status === "expired" ? "pasó el plazo para pagarlo" : "se rechazó o lo anulaste"}. No se te
+                  cobró nada.{" "}
+                  <button type="button" className="link-btn" onClick={() => setPago(null)}>Intentar de nuevo</button>
+                </div>
+              ) : pago ? (
+                <div className="esperando">
+                  <span className="girando" />
+                  Esperando la confirmación de la pasarela…{" "}
+                  <button type="button" className="link-btn"
+                          onClick={() => window.open(pago.checkoutUrl, "_blank", "noopener,width=480,height=720")}>
+                    Abrirla de nuevo
+                  </button>
                 </div>
               ) : (
                 <p className="hint centro" style={{ display: "flex", gap: 6, justifyContent: "center", alignItems: "center" }}>

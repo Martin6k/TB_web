@@ -538,10 +538,11 @@ empresa que cobra la revisa y la resuelve de una de dos formas:
 `deuda.reanudada` solo cambia una deuda que esté disputada: si llega tarde, después de un pago o un
 retiro, no reabre nada.
 
-**`pago.confirmado` dice con qué se pagó** en `medio`: `webpay`, `mercadopago` o `khipu`. Khipu
-cobra de verdad cuando DataBridge tiene la llave de una cuenta de cobro; Webpay y Mercado Pago son
-simuladas. Un pago de Khipu se confirma solo cuando Khipu dice que la transferencia está
-conciliada, con el monto y la transacción del cobro.
+**`pago.confirmado` dice con qué se pagó** en `medio`: `webpay`, `mercadopago` o `khipu`. Webpay
+cobra de verdad contra Transbank (ambiente de integración por omisión) y Khipu cuando DataBridge
+tiene la llave de una cuenta de cobro; Mercado Pago es simulada. Un pago de Webpay se confirma solo
+cuando Transbank lo autoriza y el monto y la orden calzan; uno de Khipu, cuando Khipu dice que la
+transferencia está conciliada, con el monto y la transacción del cobro.
 
 **En UF, `pago.confirmado` trae el valor de la UF usado.** La UF cambia todos los días; el acreedor
 tiene que poder reconstruir por qué un pago de `UF 38,5` fueron esos pesos.

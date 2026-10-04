@@ -31,6 +31,8 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -172,13 +174,72 @@ class PaymentControllerTest {
     }
 
     @Test
-    void retorno_de_webpay_redirige_a_la_pantalla_de_resultado() throws Exception {
-        when(payments.confirmWebpay("token123", null))
-                .thenReturn(new PaymentService.WebpayCommitResult(pago(), true, "Aprobado"));
+    void la_pagina_de_webpay_es_html_y_publica() throws Exception {
+        when(payments.paginaWebpay(41L, "firma")).thenReturn("<form action=\"https://webpay3gint.transbank.cl\"></form>");
 
-        mvc.perform(post("/api/payments/webpay/return").param("token_ws", "token123"))
-                .andExpect(status().isSeeOther())
-                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.header().string(
-                        "Location", org.hamcrest.Matchers.containsString("/pasarela/webpay/resultado?status=approved")));
+        mvc.perform(get("/api/payments/public/41/webpay").param("sig", "firma"))
+                .andExpect(status().isOk())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.TEXT_HTML))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("webpay3gint.transbank.cl")));
+    }
+
+    @Test
+    void la_vuelta_de_webpay_redirige_al_resultado_por_get_y_por_post() throws Exception {
+        when(payments.retornoWebpay("tok", null, null)).thenReturn("http://localhost:8080/pasarela/41?sig=x");
+        when(payments.retornoWebpay(null, "tbk", "ORD41T123")).thenReturn("http://localhost:8080/pasarela/41?sig=x");
+
+        //  Pago: Webpay vuelve por GET con token_ws.
+        mvc.perform(get("/api/payments/public/webpay/retorno").param("token_ws", "tok"))
+                .andExpect(status().isFound())
+                .andExpect(header().string("Location", "http://localhost:8080/pasarela/41?sig=x"));
+        //  Anulado: vuelve por POST, con TBK_TOKEN y la orden.
+        mvc.perform(post("/api/payments/public/webpay/retorno")
+                        .contentType(MediaType.APPLICATION_FORM_URLENCODED)
+                        .param("TBK_TOKEN", "tbk").param("TBK_ORDEN_COMPRA", "ORD41T123"))
+                .andExpect(status().isFound())
+                .andExpect(header().string("Location", "http://localhost:8080/pasarela/41?sig=x"));
+    }
+
+    @Test
+    void ya_no_hay_un_commit_de_webpay_publico() throws Exception {
+        //  Confirmar un token cualquiera sin sesion devolvia el pago a quien lo pidiera.
+        mvc.perform(post("/api/payments/webpay/commit").param("token", "tok")).andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void la_pagina_del_resultado_le_pregunta_a_khipu_sin_sesion() throws Exception {
+        when(payments.verificar(41L, "firma")).thenReturn(pago());
+        when(payments.cancelar(41L, "firma")).thenReturn(pago());
+
+        mvc.perform(post("/api/payments/public/41/verificar").param("sig", "firma"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(41));
+        mvc.perform(post("/api/payments/public/41/cancelar").param("sig", "firma"))
+                .andExpect(status().isOk());
+        verify(payments).verificar(41L, "firma");
+        verify(payments).cancelar(41L, "firma");
+    }
+
+    @Test
+    void el_aviso_de_khipu_llega_con_el_cuerpo_tal_como_vino() throws Exception {
+        String cuerpo = "{\"payment_id\": \"gqzdy6chjne9\",  \"amount\":\"1000.0000\"}";
+
+        mvc.perform(post("/api/payments/public/khipu/aviso").header("x-khipu-signature", "t=1,s=abc")
+                        .contentType(MediaType.APPLICATION_JSON).content(cuerpo))
+                .andExpect(status().isOk());
+
+        //  La firma va sobre el texto exacto: con sus espacios, sin reserializar.
+        verify(payments).avisoDeKhipu(cuerpo, "t=1,s=abc", "gqzdy6chjne9");
+    }
+
+    @Test
+    void un_aviso_de_khipu_con_firma_mala_es_401() throws Exception {
+        org.mockito.Mockito.doThrow(new ApiException(HttpStatus.UNAUTHORIZED, "Firma de Khipu invalida"))
+                .when(payments).avisoDeKhipu(any(), any(), any());
+
+        mvc.perform(post("/api/payments/public/khipu/aviso").header("x-khipu-signature", "t=1,s=mala")
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"payment_id\":\"x\"}"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.error").value("Firma de Khipu invalida"));
     }
 }

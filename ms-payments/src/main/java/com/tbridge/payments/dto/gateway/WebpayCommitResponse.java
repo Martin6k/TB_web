@@ -1,5 +1,6 @@
 package com.tbridge.payments.dto.gateway;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
@@ -25,7 +26,9 @@ public record WebpayCommitResponse(
             @JsonProperty("card_number") String cardNumber
     ) {}
 
+    /** Aprobada solo con las dos cosas: AUTHORIZED y codigo de respuesta 0. Sin codigo, no. */
+    @JsonIgnore
     public boolean isAuthorized() {
-        return "AUTHORIZED".equalsIgnoreCase(status) && (responseCode == null || responseCode == 0);
+        return "AUTHORIZED".equals(status) && responseCode != null && responseCode == 0;
     }
 }

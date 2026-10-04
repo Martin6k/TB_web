@@ -9,7 +9,6 @@ import Debts from "./pages/Debts";
 import Repact from "./pages/Repact";
 import Pay from "./pages/Pay";
 import Pasarela from "./pages/Pasarela";
-import WebpayResultado from "./pages/WebpayResultado";
 import Vencimientos from "./pages/Vencimientos";
 import Historial from "./pages/Historial";
 import MisDatos from "./pages/MisDatos";
@@ -67,7 +66,6 @@ export default function App() {
         }
       />
       <Route path="/magic" element={<Magic />} />
-      <Route path="/pasarela/webpay/resultado" element={<WebpayResultado />} />
       <Route path="/pasarela/:id" element={<Pasarela />} />
       <Route
         path="/app"

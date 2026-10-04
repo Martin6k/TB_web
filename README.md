@@ -14,9 +14,14 @@ tecnológica, y se demuestra con APOFYX y tres acreedores ficticios de rubros di
 - Instituto Andes (aranceles);
 - Clínica Dental Sonrisa Norte (tratamientos).
 
-**Khipu cobra de verdad** cuando DataBridge tiene la llave de una cuenta de cobro: el deudor paga
-con una transferencia en la página de Khipu (con una cuenta en modo desarrollador, contra un banco
-ficticio). Webpay y Mercado Pago son simulaciones.
+**Dos pasarelas cobran de verdad:**
+
+- **Webpay**, contra el ambiente de integración de Transbank, con tarjetas de prueba y sin
+  configurar nada;
+- **Khipu**, cuando DataBridge tiene la llave de una cuenta de cobro: el deudor paga con una
+  transferencia, y con una cuenta en modo desarrollador lo hace contra un banco ficticio.
+
+Mercado Pago es una simulación.
 
 **Todo el sistema se levanta con una orden** y queda en http://localhost:8080. Solo hace falta
 Docker; no hay que instalar JDK, Node ni Python:
@@ -137,7 +142,7 @@ solo, a las 11 de la noche si quiere. El acreedor se entera sin que nadie escrib
 | **Base de datos** | **MySQL 8.4**, una base por servicio | El mismo motor que usa APOFYX |
 | **Migraciones** | Flyway, con `ddl-auto: validate` | El esquema se versiona; Hibernate no lo cambia a espaldas de nadie |
 | **Mensajería** | RabbitMQ 3.13 | Lleva el aviso de pago entre servicios |
-| **Pagos** | Khipu, API de pagos v3 | Cobro real por transferencia. Webpay y Mercado Pago, simulados |
+| **Pagos** | Webpay Plus, API REST v1.2 de Transbank · Khipu, API de pagos v3 | Cobro real con tarjeta y por transferencia. Mercado Pago, simulado |
 | **Autenticación** | JWT (JJWT) · códigos de un solo uso | Sin contraseñas |
 | **Cifrado** | AES-256-GCM, de la JCA | Los secretos que hay que leer de vuelta se guardan cifrados |
 | **Contenedores** | Docker · Docker Compose | Nueve contenedores, una orden |
@@ -149,6 +154,8 @@ solo, a las 11 de la noche si quiere. El acreedor se entera sin que nadie escrib
 **Nube:** ninguna. El despliegue de referencia es local, con contenedores. Las dependencias
 externas son tres, y ninguna es obligatoria:
 
+- **Transbank**, para Webpay. Sin internet, `TRANSBANK_ENVIRONMENT=SIMULADA` vuelve a la pasarela
+  simulada.
 - **Khipu**, para cobrar de verdad. Sin `KHIPU_LLAVE`, Khipu queda simulada.
 - **El Banco Central**, para la UF. Sin credenciales, la UF se carga a mano.
 - **Un LLM** para el asistente (`XAI_API_KEY`). Sin él, responde con reglas.
@@ -228,10 +235,24 @@ Responde con el `codigo`. Con él se entra al portal en **Tengo un código de ac
 > del contenedor porque los endpoints internos **no** están publicados hacia afuera
 > ([§9](#9-requisitos-no-funcionales)).
 
+### Para pagar con Webpay
+
+Webpay abre la página real de Transbank, en su ambiente de prueba: no se mueve plata. Necesita
+internet, y no hay que configurar nada.
+
+| Paso | Qué poner |
+| --- | --- |
+| Tarjeta | `4051 8856 0044 6623` (VISA), vencimiento cualquier fecha futura, CVV `123` |
+| Autenticación del banco | RUT `11.111.111-1`, clave `123` |
+
+Al aceptar, Transbank devuelve al portal con **Pago aprobado**. **Anular compra** devuelve con
+*El pago no se completó*, y la deuda sigue igual. Un cobro que nadie termina se vence a los 15
+minutos.
+
 ### Para pagar con Khipu de verdad
 
-Sin configurar nada, las tres pasarelas son simuladas. Para que Khipu cobre de verdad hace falta
-la llave de una cuenta de cobro:
+Sin configurar nada, Khipu es simulada. Para que cobre de verdad hace falta la llave de una cuenta
+de cobro:
 
 1. En [khipu.com](https://khipu.com), crea una cuenta y una **cuenta de cobro en modo
    desarrollador**: ahí los bancos y la plata son de mentira.
@@ -346,6 +367,7 @@ flowchart TD
     Y -.->|"pago.confirmado"| R{{"RabbitMQ"}}
     R -.-> D
     I -->|"con la sesión del deudor"| D
+    Y <==>|"crear y confirmar la transacción"| W["Transbank<br/>Webpay"]
     Y <==>|"crear el cobro y preguntar en qué va"| T["Khipu"]
 
     AP["APOFYX"] ==>|"Cartera v1 · clave de API"| D
@@ -357,10 +379,10 @@ flowchart TD
 | Pieza | Qué hace |
 | --- | --- |
 | **portal** | React con Zustand y CSS propio. Se compila y lo sirve nginx, que además hace de proxy hacia el gateway: el navegador ve un solo origen y no hay CORS que resolver |
-| **gateway** | La única puerta: CORS, límite de peticiones con Bucket4j y enrutamiento |
+| **gateway** | La única puerta: CORS, límite de peticiones con Bucket4j y enrutamiento. Al retorno de Webpay le quita el `Origin`, porque es la página de Transbank la que devuelve al navegador con un formulario; CORS no se abre a nadie más |
 | **ms-auth** | Código de acceso (RUT + 6 caracteres, un solo uso, 24 h) y enlace de respaldo por correo, que es también como entra el personal de las empresas. Emite el JWT, maneja las sesiones y manda los correos, incluido el recordatorio de cuota |
 | **ms-debt** | Deudas, cargos y cuotas; convenios de 3 a 24 cuotas sin interés; reclamos y su resolución; ingesta de la cartera v1 por API o CSV; eventos de vuelta a quien entregó la cartera; resumen para el panel; certificado y comprobantes en PDF; recordatorio de las cuotas por vencer; claves de API de cada empresa |
-| **ms-payments** | Los cobros. Khipu de verdad, si tiene llave; Webpay y Mercado Pago simulados. El monto lo decide ms-debt, nunca el navegador. En UF fija los pesos al abrir el cobro. Un cobro de Khipu que nadie paga se vence a los 30 minutos |
+| **ms-payments** | Los cobros. Webpay contra Transbank y Khipu (si tiene llave) de verdad; Mercado Pago simulado. El monto lo decide ms-debt, nunca el navegador. En UF fija los pesos al abrir el cobro. Un cobro abandonado se vence: a los 15 minutos en Webpay, a los 30 en Khipu |
 | **ms-ai** | Asistente de solo lectura (Python/FastAPI). Lee las deudas con la sesión del deudor, sin acceso propio a la base, y detecta frustración o desconfianza para ajustar el tono. Usa un LLM si hay `XAI_API_KEY`; si no, reglas |
 | **MySQL 8.4** | Una base por servicio, con el esquema versionado en Flyway ([`db/README.md`](db/README.md)) |
 | **RabbitMQ** | Lleva el aviso de pago de ms-payments a ms-debt. Si está apagado, el mismo aviso va por HTTP; en los dos casos sale de una bandeja con reintentos, así que no se pierde |
@@ -380,13 +402,13 @@ com/tbridge/<servicio>/
 ├── dto/request/   lo que entra, validado con Bean Validation
 ├── dto/response/  lo que sale, documentado para Swagger
 ├── assembler/     los enlaces de HATEOAS de cada recurso
-├── client/        las llamadas a otros sistemas (otro servicio, Khipu, el Banco Central)
+├── client/        las llamadas a otros sistemas (otro servicio, Transbank, Khipu, el Banco Central)
 └── exception/     los errores propios del servicio
 ```
 
 `common` es la librería que comparten: el JWT, el manejo de errores (todos responden
 `{"error": "..."}` con el código que corresponde) y el RUT. El gateway no tiene base: solo
-`config/` (las rutas) y `filter/` (el límite de peticiones y la IP real).
+`config/` (las rutas) y `filter/` (el límite de peticiones, la IP real y el retorno de Webpay).
 
 **Swagger.** Cada servicio documenta sus endpoints en tres grupos según quién los llama —el
 **portal**, el **contrato de integración** y lo **interno**—, y el gateway los junta en una sola
@@ -417,6 +439,7 @@ publicada y la leen sistemas de otras empresas.
 | Sistemas de las agencias → ms-debt | HTTP por el gateway (`/api/v1`), con clave de API | Entran por la misma puerta, con su límite de peticiones |
 | ms-payments → ms-debt | **RabbitMQ**, cola `ms-debt.pagos-confirmados` | El pago ya ocurrió: si ms-debt está caído, el aviso espera en la cola en vez de perderse |
 | ms-debt → ms-auth, ms-payments → ms-debt | HTTP interno con `X-Internal-Key`, fuera del gateway | Son llamadas entre servicios, no de usuarios. El gateway no las expone |
+| ms-payments ↔ Transbank | HTTPS con el código de comercio y su llave | Crear la transacción y confirmarla; el navegador solo va y vuelve |
 | ms-payments ↔ Khipu | HTTPS con la llave de la cuenta de cobro (`x-api-key`) | Crear el cobro y preguntar en qué va; el navegador solo va y vuelve |
 | APOFYX ↔ DataBridge | HTTP con clave de API, y eventos firmados con HMAC-SHA256 | Son empresas distintas: ninguna entra en la base de la otra |
 
@@ -536,7 +559,7 @@ erDiagram
     payments ||--|| debt_notifications : "avisa con"
     payments {
         string gateway "webpay, mercadopago o khipu"
-        string gateway_txn_id "el payment_id de Khipu; UNIQUE junto a gateway"
+        string gateway_txn_id "el token de Webpay o el payment_id de Khipu; UNIQUE junto a gateway"
         string status "created, paid, failed, expired..."
         decimal amount
         string currency "CLP o UF"
@@ -548,8 +571,9 @@ erDiagram
     }
 ```
 
-`payments` es **append-only**: un pago no se edita, se le agregan eventos, y lo que dijo Khipu del
-pago queda entero en `payment_events.gateway_payload`. `UNIQUE (gateway,
+`payments` es **append-only**: un pago no se edita, se le agregan eventos, y lo que respondió la
+pasarela (la confirmación de Transbank, o lo que dijo Khipu) queda entero en
+`payment_events.gateway_payload`. `UNIQUE (gateway,
 gateway_txn_id)` impide cobrar dos veces la misma transacción aunque la pasarela repita el aviso.
 
 ---
@@ -564,6 +588,7 @@ flowchart LR
     EMP(("Personal de<br/>la agencia"))
     SIS(("APOFYX<br/>otro sistema"))
     KHP(("Khipu"))
+    TBK(("Transbank"))
 
     DEU --> U1["Entrar con RUT y código"]
     DEU --> U2["Ver qué debe y a quién"]
@@ -577,6 +602,7 @@ flowchart LR
     DEU --> U16["Descargar el comprobante de un pago"]
     DEU --> U17["Apagar el recordatorio por correo"]
     U5 --- KHP
+    U5 --- TBK
 
     EMP --> U8["Ver la cartera al día"]
     EMP --> U9["Cargar cartera por CSV"]
@@ -639,7 +665,12 @@ sequenceDiagram
 **El navegador nunca dice cuánto hay que pagar ni si el pago salió bien.** El monto lo pregunta
 ms-payments a ms-debt, y la aprobación la confirma ms-payments con Khipu, de servidor a servidor.
 Si el deudor cierra la ventana antes de volver, el pago igual se registra: ms-payments le pregunta
-a Khipu por los cobros abiertos cada 30 segundos. El aviso de vuelta tampoco pasa por el navegador.
+a Khipu por los cobros abiertos cada 30 segundos.
+
+**Con Webpay es igual, con otra forma:** ms-payments abre la transacción en Transbank y lleva al
+deudor a Webpay con un formulario POST. Cuando Webpay lo devuelve, ms-payments confirma la
+transacción con Transbank (`PUT /transactions/{token}`) antes de mostrarle el resultado. Se aprueba
+solo con `AUTHORIZED`, código de respuesta 0, el monto cobrado y la orden de compra de ese pago. El aviso de vuelta tampoco pasa por el navegador.
 
 ### Estados de una deuda
 
@@ -677,7 +708,7 @@ componente con su interfaz HTTP, su base propia y sus dependencias dibujadas.
 | **Seguridad** · sesión | El JWT dura **15 minutos** y vive en la memoria de la pestaña, no en `localStorage`. Mantiene a la persona adentro una llave de renovación de 256 bits en una cookie `HttpOnly` y `SameSite=Strict`, que ningún script puede leer. Cada uso la cambia por otra; cerrar sesión la revoca **en el servidor**, y si una llave usada reaparece, se revoca toda la sesión | `ms-auth/SessionService`, `V2__sesiones.sql` |
 | **Seguridad** · origen | Cada freno cuenta por IP, así que la IP no se puede inventar: nginx sobrescribe `X-Forwarded-For`, y el gateway solo les cree a sus proxies (`TRUSTED_PROXIES`). CORS acepta solo los orígenes del portal (`CORS_ORIGINS`), no `*` | `frontend/nginx.conf`, `gateway/ClienteReal` |
 | **Seguridad** · secretos | Lo que solo se compara se guarda como hash: códigos, tokens de enlace, llaves de renovación y claves de API. Lo que hay que leer de vuelta —el secreto con que se firman los avisos— va **cifrado con AES-256-GCM**, con una llave fuera de la base (`CIFRADO_LLAVE`). Un secreto en claro de antes se cifra solo al arrancar | `ms-debt/config/Cifrado`, `V3__secretos_cifrados.sql` |
-| **Seguridad** · pagos | Un pago de Khipu se aprueba solo si Khipu dice que está conciliado (`done`, sin reversa) **y** el monto y la transacción calzan con el cobro. Nada de lo que traiga el navegador o el aviso se aplica: siempre se le pregunta a Khipu. El aviso además se verifica con su firma HMAC, y un pago real no se puede confirmar por el camino de la simulación | `ms-payments/PaymentService`, `KhipuClient`, `FirmaDeKhipu` |
+| **Seguridad** · pagos | Nada de lo que traiga el navegador se aplica: ms-payments le pregunta a la pasarela. Un pago de Webpay se aprueba solo si Transbank confirma `AUTHORIZED` con código 0 **y** el monto y la orden calzan; un retorno repetido no se vuelve a confirmar. Uno de Khipu, solo si Khipu dice que está conciliado (`done`, sin reversa) **y** el monto y la transacción calzan; su aviso se verifica con firma HMAC. Un pago real no se puede confirmar por el camino de la simulación | `ms-payments/PaymentService`, `WebpayClient`, `KhipuClient`, `FirmaDeKhipu` |
 | **Seguridad** · enumeración | "No hay código" y "código incorrecto" responden **lo mismo**, para que nadie averigüe qué RUT tienen deuda | `AuthService.entrarConCodigo` |
 | **Seguridad** · autorización | Cada sesión se identifica por RUT. Un deudor ve, paga y reclama solo lo suyo; una agencia ve y resuelve solo la cartera de su mandato | `DebtService`, `DisputaService` |
 | **Seguridad** · integridad | Los eventos van firmados con HMAC-SHA256, caducan a los 5 minutos y se descartan si llegan repetidos | `docs/integracion/README.md` §8 |
@@ -687,13 +718,13 @@ componente con su interfaz HTTP, su base propia y sus dependencias dibujadas.
 | **Seguridad** · entradas | Cada petición entra como un tipo con sus reglas (`@NotBlank`, `@Size`, `@Pattern`...), y lo que no cumple se responde con `400` y un mensaje para la persona. Un JSON mal escrito o una ruta que no existe responden `400` y `404`, no `500` | `dto/request/`, `common/ApiExceptionHandler` |
 | **Rendimiento** · medido | Con 100 personas a la vez, **cero errores** en unas 32.000 peticiones y un p95 de 7 a 12 ms según el día. En estrés, holgado hasta 1.000 peticiones por segundo; **toca techo en unas 1.800**, donde se pone lento pero no falla. Mediciones del 23 y 24 de septiembre, con máquina y detalle en [`rendimiento/`](rendimiento/README.md) | `rendimiento/` |
 | **Rendimiento** · límite de peticiones | Dos capas: el gateway deja 10 por minuto en `/api/auth/**` y 120 globales por IP, y `ms-auth` bloquea diez minutos al origen que falla diez códigos | `gateway/RateLimitFilter`, `AuthService` |
-| **Rendimiento** · consultas | Índices para los caminos que se usan: `ix_debt_creditor_status` (la cartera de un acreedor), `ix_debt_debtor` (lo que debe una persona). `uq_payment_gateway` evita cobrar dos veces la misma transacción y además es el índice con que se busca el aviso de Khipu | `V1__esquema_inicial.sql` |
+| **Rendimiento** · consultas | Índices para los caminos que se usan: `ix_debt_creditor_status` (la cartera de un acreedor), `ix_debt_debtor` (lo que debe una persona). `uq_payment_gateway` evita cobrar dos veces la misma transacción y además es el índice con que se busca el retorno de Webpay y el aviso de Khipu | `V1__esquema_inicial.sql` |
 | **Rendimiento** · memoria | La JVM lee el límite del contenedor (`MaxRAMPercentage=75`), y cada servicio tiene su tope declarado | `*/Dockerfile` |
 | **Rendimiento** · portal | La página de la empresa, la de los gráficos, se carga de forma diferida: el JS principal pesa 320 kB y el de esa página 420 kB, antes de gzip | `frontend/src/App.jsx` |
 | **Usabilidad** | Tema claro (crema y verde bosque) y oscuro (carbón y morado), que sigue al del sistema hasta que la persona elige. Quien pidió menos movimiento no ve animaciones. La barra de estado se anuncia como barra de progreso a los lectores de pantalla | `frontend/src/index.css` |
 | **Disponibilidad** | Los nueve contenedores declaran `healthcheck`, y ninguno arranca antes que aquel del que depende. La salud la da Actuator, que incluye la conexión a la base. `restart: unless-stopped` los repone si se caen | `docker-compose.yml` |
 | **Disponibilidad** · entrega | Todo lo que sale hacia otro sistema pasa por una bandeja con reintentos (1 min, 5 min, 30 min, 2 h, 6 h, 24 h). Si APOFYX está caído, el aviso se entrega cuando vuelve | `outbox`, `EventDispatcher` |
-| **Escalabilidad** | La identidad viaja en JWT y las sesiones se guardan en `tb_auth`. Para varias réplicas falta coordinar dos cosas: los límites del gateway viven en la memoria de cada instancia, y las tareas programadas (recordatorios, despachadores, vencimiento de pagos) correrían en cada una. No se validó con varias instancias | `RateLimitFilter`, `EventDispatcher`, `ConciliacionKhipu` |
+| **Escalabilidad** | La identidad viaja en JWT y las sesiones se guardan en `tb_auth`. Para varias réplicas falta coordinar dos cosas: los límites del gateway viven en la memoria de cada instancia, y las tareas programadas (recordatorios, despachadores, vencimiento de pagos) correrían en cada una. No se validó con varias instancias | `RateLimitFilter`, `EventDispatcher`, `ConciliacionKhipu`, `WebpayVencidos` |
 | **Portabilidad** | Una orden levanta el sistema entero en cualquier máquina con Docker | `docker-compose.yml` |
 | **Mantenibilidad** | Los tres servicios tienen la misma estructura de paquetes. `ddl-auto: validate` se niega a arrancar si las entidades y las tablas no calzan | `application.properties` |
 | **Documentación** | Todos los endpoints en Swagger, con sus respuestas posibles y ejemplos reales | http://localhost:8080/swagger-ui.html |
@@ -741,10 +772,13 @@ las trae todas, comentadas. El mismo `.env` lo leen los servicios cuando se corr
 | `CORS_ORIGINS` | los del portal | Qué orígenes pueden hacer peticiones con credenciales al gateway |
 | `TRUSTED_PROXIES` | local y redes de Docker | En qué proxies confía el gateway para saber la IP del cliente |
 | `WEBHOOK_SECRET` | `tbridge-webhook-dev` | Firma los enlaces de pago y verifica los avisos de las pasarelas simuladas |
+| `TRANSBANK_ENVIRONMENT` | `TEST` | `TEST` cobra contra el ambiente de integración de Transbank; `SIMULADA`, sin internet, vuelve a la pasarela simulada |
+| `TRANSBANK_API_URL`, `TRANSBANK_COMMERCE_CODE`, `TRANSBANK_API_KEY` | los públicos de integración | En producción, los del comercio |
+| `TRANSBANK_VENCE_EN` | `15m` | Cuándo se vence un cobro de Webpay que nadie terminó |
 | `KHIPU_LLAVE` | vacía | La llave de API de una cuenta de cobro de Khipu. Con ella, Khipu cobra de verdad; vacía, es simulada. **Es un secreto: solo en el `.env`** |
 | `KHIPU_URL_AVISOS`, `KHIPU_SECRETO` | vacías | Con una dirección pública de DataBridge: dónde avisa Khipu, y el secreto con que se verifica su firma |
 | `KHIPU_VENCE_EN` | `30m` | Cuándo se vence un cobro de Khipu que nadie pagó |
-| `PORTAL_PORT`, `PUBLIC_URL` | `8080`, `http://localhost:8080` | Dónde queda el portal, y la dirección que va en los correos y en el retorno de Khipu |
+| `PORTAL_PORT`, `PUBLIC_URL` | `8080`, `http://localhost:8080` | Dónde queda el portal, y la dirección que va en los correos y en el retorno de Webpay y de Khipu |
 | `BCENTRAL_USER`, `BCENTRAL_PASS` | vacías | La UF del Banco Central. Sin ellas, se carga a mano |
 | `XAI_API_KEY` | vacía | El LLM del asistente. Sin ella, responde con reglas |
 | `MIN_DIAS_MORA` | `30` | Desde cuántos días de mora del cargo impago más antiguo entra una deuda a cobranza |
@@ -768,7 +802,7 @@ cd ms-ai ; .venv\Scripts\python.exe -m unittest discover tests  # el asistente
 
 Cada servicio tiene sus pruebas en `src/test/java`, con la misma estructura de paquetes que el
 código. **Ninguna necesita base de datos ni internet**, así que corren en segundos en cualquier
-equipo: Khipu se reemplaza por un servidor HTTP local.
+equipo: Transbank y Khipu se reemplazan por un servidor HTTP local.
 
 > Usa `clean`. El editor de VS Code compila por su cuenta dentro de `target/`, y sin `clean`
 > Maven puede dar por buena una clase vieja.
@@ -776,20 +810,21 @@ equipo: Khipu se reemplaza por un servidor HTTP local.
 | Tipo | Qué cubre |
 | --- | --- |
 | **Unitarias** (JUnit 5 + Mockito) | Las reglas de cada servicio con los repositorios simulados. Que cada quien vea solo lo suyo; que el monto salga de ms-debt y no del navegador; que un pago avisado dos veces se abone una; que las cuotas se paguen en orden; que solo entren deudores morosos; que un cliente al día cierre lo que estaba en cobranza; que el mandato registre al acreedor nuevo; que un convenio sobreviva al mes siguiente; el reclamo y sus dos resoluciones; el cifrado y que un secreto viejo se cifre al arrancar; la sesión revocable, el código de acceso, la UF, la firma de los eventos y el recordatorio |
+| **De Webpay** | El cliente contra un Transbank falso: crear, confirmar y sus errores, sin que el detalle de Transbank llegue a la persona. El retorno aprobado; rechazado, sin código, con otro monto o con otra orden; anulado, con error de formulario y por tiempo; repetido; con Transbank caído; con un token ajeno; los abandonados que vencen, y el modo simulado |
 | **De Khipu** | El cliente contra un Khipu falso: crear el cobro, preguntar en qué va y sus errores. El pago conciliado, el que sigue en verificación, el rechazado, el revertido y el arrepentido; que otro monto u otra transacción no se aprueben; que un pago real no se confirme por la simulación; la consulta periódica que cierra lo pagado y vence lo abandonado, y la firma de los avisos |
-| **De la capa web** (`@WebMvcTest` + MockMvc) | Cada controlador con su seguridad, su validación y su JSON: `401` sin sesión, `403` con la deuda de otro, `400` con datos malos, los `_links` según quién mira, la cookie de la sesión y los nombres del contrato v1 intactos. El aviso de Khipu llega con el cuerpo tal como vino, porque sobre ese texto va la firma |
+| **De la capa web** (`@WebMvcTest` + MockMvc) | Cada controlador con su seguridad, su validación y su JSON: `401` sin sesión, `403` con la deuda de otro, `400` con datos malos, los `_links` según quién mira, la cookie de la sesión y los nombres del contrato v1 intactos. El aviso de Khipu llega con el cuerpo tal como vino, porque sobre ese texto va la firma. En el gateway, que el retorno de Webpay pase sin `Origin` y nada más |
 | **De seguridad** | En cada push, **CodeQL** (Java, JavaScript y Python), una auditoría de dependencias que rompe el build ante una vulnerabilidad alta, y Dependabot |
 | **De rendimiento** (k6) | Cómo lo siente una persona y dónde está el techo. Se corren a mano, con el sistema arriba ([`rendimiento/`](rendimiento/README.md)) |
 
-**266 pruebas en Java y 12 en Python**, sin fallos:
+**286 pruebas en Java y 12 en Python**, sin fallos:
 
 | Módulo | Pruebas |
 | --- | --- |
 | `common` | 18 |
-| `gateway` | 11 |
+| `gateway` | 13 |
 | `ms-auth` | 40 |
 | `ms-debt` | 143 |
-| `ms-payments` | 54 |
+| `ms-payments` | 72 |
 | `ms-ai` (Python) | 12 |
 
 Además, la cadena completa con los tres sistemas se prueba de punta a punta con un script que
@@ -839,9 +874,8 @@ sola.
 5. **O reclama.** *No reconozco esta deuda*, con un motivo y, si quiere, un detalle. La deuda queda
    **En revisión**. La empresa la ve con el filtro del mismo nombre, y toca **Reanudar cobro** o
    **Retirar**.
-6. **Paga con Khipu**, en la página de Khipu, con el banco de prueba
-   ([cómo activarlo](#para-pagar-con-khipu-de-verdad)). Sin llave, cualquiera de las tres pasarelas
-   abre la simulación.
+6. **Paga con Webpay**, con la [tarjeta de prueba](#para-pagar-con-webpay), en la página real de
+   Transbank; o con Khipu, con el banco de prueba ([cómo activarlo](#para-pagar-con-khipu-de-verdad)).
 7. **Todo vuelve por la cadena.** ms-payments avisa a ms-debt, ms-debt emite los eventos, y APOFYX
    y el acreedor los reciben.
 8. **Queda el rastro.** El deudor ve el pago en su historial, con qué cuotas cubrió, y descarga el
@@ -850,9 +884,6 @@ sola.
 **Las marcas de las pasarelas.** Webpay, Mercado Pago y Khipu aparecen con su logo oficial, tal
 como Transbank, Mercado Pago y Khipu los publican para los comercios, porque es lo que el deudor
 reconoce. Los logos son marcas de sus dueños. Las simuladas lo dicen en pantalla: *Simulación*.
-
-**Webpay real quedó fuera de este repositorio** a propósito: la integración con Transbank la
-está haciendo otra parte del equipo, y se suma por separado.
 
 **Pagos en UF.** Usan la UF de ese día exacto, del **Banco Central**. Como la publica con un mes
 de adelanto, ms-payments la carga al arrancar y cada mañana a las 9:30. Sin credenciales, se carga
@@ -870,7 +901,8 @@ $cuerpo | docker compose exec -T ms-payments curl -s -X POST http://127.0.0.1:80
 
 | Verificación | Resultado |
 | --- | --- |
-| Pruebas Java (`mvnw clean test`, JDK 25) | **266**, sin fallos |
+| Pruebas Java (`mvnw clean test`, JDK 25) | **286**, sin fallos |
+| Webpay | Contra el ambiente de integración de Transbank, con los contenedores reconstruidos y en Edge: el deudor anula en Webpay y el portal dice *El pago no se completó*; paga con la tarjeta de prueba y vuelve con *Pago aprobado*, el pago queda `paid` con la respuesta `AUTHORIZED` guardada, y el contrato de Patrimonio queda con lo que corresponde |
 | Pruebas Python (`ms-ai`) | **12**, sin fallos |
 | Build del portal | Correcto, 754 módulos |
 | Cadena completa, sobre los contenedores reconstruidos | **16 de 16** comprobaciones: el cliente moroso nuevo llega desde Patrimonio, DataBridge registra al acreedor y lo invita, el deudor reclama y la disputa llega al acreedor, la agencia reanuda, el pago vuelve hasta el contrato y un lote repetido no se procesa dos veces |
@@ -880,8 +912,8 @@ $cuerpo | docker compose exec -T ms-payments curl -s -X POST http://127.0.0.1:80
 
 **Lo que no está:**
 
-- **Webpay y Mercado Pago son simuladas.** Webpay real lo trae otra parte del equipo; Mercado Pago
-  es el mismo trabajo que Khipu: un cliente, un retorno y su confirmación.
+- **Mercado Pago es simulada.** Integrarla es el mismo trabajo que Webpay y Khipu: un cliente, un
+  retorno y su confirmación.
 - **Khipu real falta probarlo con una cuenta de verdad** en modo desarrollador
   ([cómo](#para-pagar-con-khipu-de-verdad)).
 - **WhatsApp:** el contrato admite el canal, pero los códigos salen solo por correo.

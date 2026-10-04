@@ -35,10 +35,9 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/actuator/health/**", "/actuator/info").permitAll()
                         .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
-                        //  Los protege la firma HMAC del pago o la firma/token de la pasarela, no una sesion.
+                        //  Los protege la firma HMAC del pago, no una sesion.
                         .requestMatchers("/api/payments/webhooks/**").permitAll()
                         .requestMatchers("/api/payments/public/**").permitAll()
-                        .requestMatchers("/api/payments/webpay/**").permitAll()
                         .requestMatchers("/internal/**").permitAll()
                         .anyRequest().authenticated()
                 )
