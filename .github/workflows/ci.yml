@@ -16,7 +16,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
         with:
-          distribution: temurin
+          distribution: oracle
           java-version: '25'
           cache: maven
       - name: common, gateway, ms-auth, ms-debt y ms-payments

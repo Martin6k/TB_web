@@ -201,6 +201,10 @@ services:
       #  Con llave, Khipu cobra de verdad (una cuenta de cobro en modo
       #  desarrollador paga con DemoBank). Sin llave, queda simulada. El
       #  deudor vuelve de Khipu a PUBLIC_URL, que viene en el bloque comun.
+      #  Webpay cobra de verdad en el ambiente de integracion de Transbank, con
+      #  sus credenciales publicas de prueba. SIMULADA = sin internet. El deudor
+      #  vuelve de Webpay a PUBLIC_URL, que viene en el bloque comun.
+      TRANSBANK_ENVIRONMENT: ${TRANSBANK_ENVIRONMENT:-TEST}
       KHIPU_URL: ${KHIPU_URL:-https://payment-api.khipu.com}
       KHIPU_LLAVE: ${KHIPU_LLAVE:-}
       KHIPU_URL_AVISOS: ${KHIPU_URL_AVISOS:-}

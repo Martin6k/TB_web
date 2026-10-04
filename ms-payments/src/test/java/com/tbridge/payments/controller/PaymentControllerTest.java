@@ -31,6 +31,8 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -169,6 +171,39 @@ class PaymentControllerTest {
                         .contentType(MediaType.APPLICATION_JSON).content("{\"paymentId\":41,\"txnId\":\"wp-1\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value(41));
+    }
+
+    @Test
+    void la_pagina_de_webpay_es_html_y_publica() throws Exception {
+        when(payments.paginaWebpay(41L, "firma")).thenReturn("<form action=\"https://webpay3gint.transbank.cl\"></form>");
+
+        mvc.perform(get("/api/payments/public/41/webpay").param("sig", "firma"))
+                .andExpect(status().isOk())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.TEXT_HTML))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("webpay3gint.transbank.cl")));
+    }
+
+    @Test
+    void la_vuelta_de_webpay_redirige_al_resultado_por_get_y_por_post() throws Exception {
+        when(payments.retornoWebpay("tok", null, null)).thenReturn("http://localhost:8080/pasarela/41?sig=x");
+        when(payments.retornoWebpay(null, "tbk", "ORD41T123")).thenReturn("http://localhost:8080/pasarela/41?sig=x");
+
+        //  Pago: Webpay vuelve por GET con token_ws.
+        mvc.perform(get("/api/payments/public/webpay/retorno").param("token_ws", "tok"))
+                .andExpect(status().isFound())
+                .andExpect(header().string("Location", "http://localhost:8080/pasarela/41?sig=x"));
+        //  Anulado: vuelve por POST, con TBK_TOKEN y la orden.
+        mvc.perform(post("/api/payments/public/webpay/retorno")
+                        .contentType(MediaType.APPLICATION_FORM_URLENCODED)
+                        .param("TBK_TOKEN", "tbk").param("TBK_ORDEN_COMPRA", "ORD41T123"))
+                .andExpect(status().isFound())
+                .andExpect(header().string("Location", "http://localhost:8080/pasarela/41?sig=x"));
+    }
+
+    @Test
+    void ya_no_hay_un_commit_de_webpay_publico() throws Exception {
+        //  Confirmar un token cualquiera sin sesion devolvia el pago a quien lo pidiera.
+        mvc.perform(post("/api/payments/webpay/commit").param("token", "tok")).andExpect(status().isUnauthorized());
     }
 
     @Test

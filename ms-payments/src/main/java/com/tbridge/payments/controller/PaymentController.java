@@ -23,6 +23,7 @@ import org.springframework.hateoas.CollectionModel;
 import org.springframework.hateoas.EntityModel;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -30,12 +31,16 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.net.URI;
+
 /**
- * Los pagos del portal, la pagina publica de la pasarela y el aviso de Khipu.
+ * Los pagos del portal, la pagina publica de la pasarela, la ida y vuelta de
+ * Webpay y el aviso de Khipu.
  */
 @RestController
 @RequestMapping("/api/payments")
@@ -128,6 +133,32 @@ public class PaymentController {
     public PaymentResponse confirm(@PathVariable Long id,
                                    @Parameter(description = "La firma del enlace de pago") @RequestParam String sig) {
         return payments.confirmPublic(id, sig);
+    }
+
+    @GetMapping(value = "/public/{id}/webpay", produces = MediaType.TEXT_HTML_VALUE)
+    @Operation(summary = "Ir a pagar a Webpay",
+            description = "Una pagina que envia sola el formulario con el `token_ws` a Webpay, como pide Transbank. "
+                    + "Es el `checkoutUrl` de un pago con Webpay.")
+    @ApiResponse(responseCode = "200", description = "La pagina que lleva a Webpay")
+    @ApiResponse(responseCode = "401", description = "La firma no corresponde a ese pago",
+            content = @Content(schema = @Schema(implementation = ApiError.class)))
+    public String webpay(@PathVariable Long id,
+                         @Parameter(description = "La firma del enlace de pago") @RequestParam String sig) {
+        return payments.paginaWebpay(id, sig);
+    }
+
+    @RequestMapping(value = "/public/webpay/retorno", method = {RequestMethod.GET, RequestMethod.POST})
+    @Operation(summary = "La vuelta desde Webpay",
+            description = """
+                    Webpay devuelve aca al deudor. Con `token_ws` (pago) se confirma la transaccion con Transbank;                     con `TBK_TOKEN` (anulo) o solo `TBK_ORDEN_COMPRA` (se le acabo el tiempo) el pago queda                     fallido. Responde con una redireccion a la pagina del resultado.""")
+    @ApiResponse(responseCode = "302", description = "A la pagina del resultado del pago")
+    public ResponseEntity<Void> retornoWebpay(
+            @RequestParam(name = "token_ws", required = false) String tokenWs,
+            @RequestParam(name = "TBK_TOKEN", required = false) String tbkToken,
+            @RequestParam(name = "TBK_ORDEN_COMPRA", required = false) String ordenDeCompra) {
+        return ResponseEntity.status(HttpStatus.FOUND)
+                .location(URI.create(payments.retornoWebpay(tokenWs, tbkToken, ordenDeCompra)))
+                .build();
     }
 
     @PostMapping("/public/{id}/verificar")

@@ -10,11 +10,14 @@ import { CheckAnimado, IconoCandado } from "../components/Iconos";
  * El pago en su ventana aparte.
  *
  * Con una pasarela simulada, confirma el pago con la misma firma del enlace,
- * que es lo que haria el aviso firmado de la pasarela real. Con Khipu de
- * verdad el deudor paga en la pagina de Khipu, que lo devuelve aca sin decir
- * nada: esta pagina le pide a ms-payments que le pregunte a Khipu, y repite
- * mientras Khipu verifica la transferencia. Si volvio por "cancelar", el pago
- * queda fallido, salvo que haya alcanzado a pagar.
+ * que es lo que haria el aviso firmado de la pasarela real. Con las reales,
+ * esta pagina es donde vuelve el deudor:
+ *
+ * - Webpay lo devuelve ya confirmado (ms-payments confirmo con Transbank antes
+ *   de redirigir), asi que solo se muestra como quedo.
+ * - Khipu lo devuelve sin decir nada: esta pagina le pide a ms-payments que le
+ *   pregunte a Khipu, y repite mientras Khipu verifica la transferencia. Si
+ *   volvio por "cancelar", el pago queda fallido, salvo que alcanzo a pagar.
  */
 const CADA_MS = 4000;
 const INTENTOS = 45;
@@ -39,7 +42,8 @@ export default function Pasarela() {
   }, [id, sig, cancelado]);
 
   // Khipu puede tardar unos segundos en conciliar la transferencia.
-  const verificando = pago && !pago.simulada && pago.status === "created";
+  const verificando = pago && !pago.simulada && pago.status === "created" && pago.gateway === "khipu";
+  const enWebpay = pago && !pago.simulada && pago.status === "created" && pago.gateway === "webpay";
   useEffect(() => {
     if (!verificando || intentos >= INTENTOS) return;
     const t = setTimeout(async () => {
@@ -89,6 +93,14 @@ export default function Pasarela() {
                 ? "Pasó el plazo para pagarlo."
                 : `${nombreDePasarela(pago.gateway)} lo rechazó, o lo anulaste.`}{" "}
               No se te cobró nada: cierra esta ventana y vuelve a intentarlo desde el portal.
+            </p>
+          </div>
+        ) : enWebpay ? (
+          <div style={{ padding: "16px 0 4px" }}>
+            <h2>Se paga en Webpay</h2>
+            <p className="hint">
+              Este pago se hace en la página de Webpay. Si no te llevó, o la cerraste antes de terminar, cierra esta
+              ventana y ábrelo otra vez desde el portal.
             </p>
           </div>
         ) : verificando ? (
