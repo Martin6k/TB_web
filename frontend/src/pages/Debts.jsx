@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { descargarCertificado, listarDeudas } from "../api/deudas";
-import { dinero, porMoneda, rutLegible, totalDeLaDeuda } from "../utils/formato";
+import { descargarCertificado, disputar, listarDeudas } from "../api/deudas";
+import { dinero, MOTIVOS_DISPUTA, porMoneda, rutLegible, totalDeLaDeuda } from "../utils/formato";
 import { useAuth } from "../store/authStore";
 import BarraEstado from "../components/BarraEstado";
 import Cargando from "../components/Cargando";
@@ -12,13 +12,17 @@ export default function Debts() {
   const [deudas, setDeudas] = useState(null);
   const [error, setError] = useState("");
 
-  useEffect(() => {
-    listarDeudas()
+  function cargar() {
+    return listarDeudas()
       .then(setDeudas)
       .catch((err) => {
         setError(err.status === 404 ? "" : err.message);
         setDeudas([]);
       });
+  }
+
+  useEffect(() => {
+    cargar();
   }, []);
 
   if (deudas === null) return <Cargando />;
@@ -71,17 +75,18 @@ export default function Debts() {
         </div>
       ) : (
         <section className="deudas">
-          {deudas.map((d, i) => <TarjetaDeuda key={d.id} deuda={d} i={i + 4} />)}
+          {deudas.map((d, i) => <TarjetaDeuda key={d.id} deuda={d} i={i + 4} onCambio={cargar} />)}
         </section>
       )}
     </div>
   );
 }
 
-function TarjetaDeuda({ deuda: d, i }) {
+function TarjetaDeuda({ deuda: d, i, onCambio }) {
   const pagada = d.estado === "paid";
   const cobrable = d.estado === "open" || d.estado === "repacted";
   const abonado = Number(d.pagado) > 0 && !pagada;
+  const [disputando, setDisputando] = useState(false);
 
   return (
     <article className="card deuda lift aparece" style={{ "--i": i }}>
@@ -89,7 +94,7 @@ function TarjetaDeuda({ deuda: d, i }) {
         <div>
           <span className="eyebrow">{d.acreedor}</span>
           <h3>{d.concepto}</h3>
-          <span className="sub">Contrato {d.externalId}</span>
+          <span className="sub">Ref. {d.externalId}</span>
           {d.estado === "repacted" && d.cuotasVencidas > 0 ? (
             <span className="tag tag-vencida" style={{ marginTop: 8 }}>
               {d.cuotasVencidas === 1 ? "Una cuota vencida" : `${d.cuotasVencidas} cuotas vencidas`}
@@ -105,6 +110,20 @@ function TarjetaDeuda({ deuda: d, i }) {
 
       <BarraEstado deuda={d} />
 
+      {d.estado === "disputed" ? (
+        <div className="aviso-revision">
+          <b>En revisión: {MOTIVOS_DISPUTA[d.disputa?.motivo] || "lo que nos dijiste"}</b>
+          <span>
+            {d.acreedor} está revisando tu caso. Mientras tanto esta deuda no se cobra ni te llegan recordatorios.
+          </span>
+        </div>
+      ) : null}
+
+      {disputando ? (
+        <FormularioDisputa deuda={d} onCancelar={() => setDisputando(false)}
+                           onListo={() => { setDisputando(false); onCambio(); }} />
+      ) : null}
+
       <div className="deuda-acciones">
         {pagada ? (
           <button className="btn btn-soft btn-sm" type="button" onClick={() => descargarCertificado(d.id)}>
@@ -118,6 +137,11 @@ function TarjetaDeuda({ deuda: d, i }) {
             Pagar en cuotas
           </Link>
         ) : null}
+        {cobrable && !disputando ? (
+          <button type="button" className="link-btn" onClick={() => setDisputando(true)}>
+            No reconozco esta deuda
+          </button>
+        ) : null}
         {cobrable ? (
           <Link className="btn btn-primary btn-sm" to={`/app/pagar/${d.id}`}>
             {d.estado === "repacted" ? "Pagar cuotas" : "Pagar"}
@@ -126,5 +150,53 @@ function TarjetaDeuda({ deuda: d, i }) {
         ) : null}
       </div>
     </article>
+  );
+}
+
+/**
+ * Decir que una deuda no corresponde. La empresa que cobra la revisa, y
+ * mientras tanto no se cobra. Lo que se escribe aca lo ve solo esa empresa.
+ */
+function FormularioDisputa({ deuda, onCancelar, onListo }) {
+  const [motivo, setMotivo] = useState("");
+  const [detalle, setDetalle] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  async function enviar(e) {
+    e.preventDefault();
+    setBusy(true);
+    setError("");
+    try {
+      await disputar(deuda.id, motivo, detalle.trim() || null);
+      onListo();
+    } catch (err) {
+      setError(err.message);
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form className="disputa" onSubmit={enviar}>
+      <b>¿Por qué no corresponde?</b>
+      <div className="disputa-motivos">
+        {Object.entries(MOTIVOS_DISPUTA).map(([codigo, texto]) => (
+          <label key={codigo} className={`chip ${motivo === codigo ? "on" : ""}`}>
+            <input type="radio" name={`motivo-${deuda.id}`} value={codigo} checked={motivo === codigo}
+                   onChange={() => setMotivo(codigo)} />
+            {texto}
+          </label>
+        ))}
+      </div>
+      <textarea rows={3} maxLength={500} value={detalle} onChange={(e) => setDetalle(e.target.value)}
+                placeholder="Si quieres, cuéntanos más: cuándo pagaste, qué monto debería ser…" />
+      {error ? <div className="error">{error}</div> : null}
+      <div className="deuda-acciones">
+        <button type="button" className="btn btn-ghost btn-sm" onClick={onCancelar} disabled={busy}>Cancelar</button>
+        <button type="submit" className="btn btn-primary btn-sm" disabled={busy || !motivo}>
+          {busy ? <><span className="girando" /> Enviando…</> : "Enviar a revisión"}
+        </button>
+      </div>
+    </form>
   );
 }

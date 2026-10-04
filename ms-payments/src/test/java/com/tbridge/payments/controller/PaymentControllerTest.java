@@ -59,7 +59,7 @@ class PaymentControllerTest {
 
     private static PaymentResponse pago() {
         return new PaymentResponse(41L, 3L, null, new BigDecimal("410000"), Payment.Currency.CLP, 410000L, null,
-                Payment.Gateway.webpay, Payment.Status.created, null, Instant.parse("2026-09-24T12:00:00Z"), null);
+                Payment.Gateway.khipu, Payment.Status.created, null, Instant.parse("2026-09-24T12:00:00Z"), null, false);
     }
 
     @Test

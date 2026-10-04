@@ -7,14 +7,14 @@ export const COLUMNAS = [
   "deudor_telefono", "moneda", "concepto", "referencias", "cargo_concepto", "cargo_periodo", "cargo_monto",
   "cargo_vencimiento",
 ];
-//  Una fila por cargo: cada deuda trae sus meses impagos, porque DataBridge
-//  cobra a deudores morosos y una deuda con un solo mes no entra.
+//  Una fila por cargo, de cualquier rubro: aca, los aranceles de un instituto.
+//  Un cliente al dia va en una sola fila sin cargo, y un retiro sin deudor.
 const EJEMPLO = [
-  "CTR-2025-014;registrar;;16482337-7;persona;Felipe Rojas Muñoz;felipe.rojas@correo.cl;+56987654321;CLP;Arriendo mensual;contrato=CTR-2025-014;Arriendo agosto;2026-08;520000;2026-08-05",
-  "CTR-2025-014;registrar;;16482337-7;persona;Felipe Rojas Muñoz;felipe.rojas@correo.cl;+56987654321;CLP;Arriendo mensual;contrato=CTR-2025-014;Arriendo septiembre;2026-09;520000;2026-09-05",
-  "CTR-2024-007;registrar;;76991245-2;empresa;Comercial Ñandú SpA;administracion@nandu.cl;;UF;Arriendo local comercial;;Arriendo julio;2026-07;38,5;2026-07-05",
-  "CTR-2024-007;registrar;;76991245-2;empresa;Comercial Ñandú SpA;administracion@nandu.cl;;UF;Arriendo local comercial;;Arriendo agosto;2026-08;38,5;2026-08-05",
-  "CTR-2025-022;retirar;pago_directo;;;;;;;;;;;;",
+  "AND-2025-0412;registrar;;21345678-4;persona;Benjamín Araya Toro;benjamin.araya@correo.cl;+56944120387;CLP;Arancel Técnico en Enfermería;matricula=AND-2025-0412;Arancel julio;2026-07;185000;2026-07-10",
+  "AND-2025-0412;registrar;;21345678-4;persona;Benjamín Araya Toro;benjamin.araya@correo.cl;+56944120387;CLP;Arancel Técnico en Enfermería;matricula=AND-2025-0412;Arancel agosto;2026-08;185000;2026-08-10",
+  "AND-2025-0412;registrar;;21345678-4;persona;Benjamín Araya Toro;benjamin.araya@correo.cl;+56944120387;CLP;Arancel Técnico en Enfermería;matricula=AND-2025-0412;Arancel septiembre;2026-09;185000;2026-09-10",
+  "AND-2025-0298;registrar;;22134567-3;persona;Martín Fuentes Ríos;martin.fuentes@correo.cl;;CLP;Arancel Técnico en Enfermería;matricula=AND-2025-0298;;;;",
+  "AND-2023-0177;retirar;pago_directo;;;;;;;;;;;;",
 ];
 
 /** La plantilla del contrato, con BOM para que Excel respete las tildes. */
@@ -98,8 +98,8 @@ export default function CargaCsv({ onCargada }) {
         <button type="button" className="link-btn" onClick={descargarPlantilla}>Descargar plantilla</button>
       </div>
       <p className="hint" style={{ margin: "-4px 0 16px" }}>
-        Solo deudores morosos: una deuda entra con al menos {opciones?.minMesesImpagos ?? 2} meses impagos.
-        Las que traen menos se rechazan solas, con su motivo.
+        Solo deudores morosos: una deuda entra cuando su cargo impago más antiguo lleva al menos{" "}
+        {opciones?.minDiasMora ?? 30} días vencido. Las que no, se rechazan solas, con su motivo.
       </p>
       {error ? <div className="error">{error}</div> : null}
 

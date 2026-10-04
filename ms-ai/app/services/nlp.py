@@ -2,7 +2,7 @@
 El motor local del asistente: responde sin LLM, con reglas.
 
 Lee las deudas tal como las entrega ms-debt (`saldo`, `moneda`, `estado`...).
-Pesos y UF no se suman entre si: una deuda de arriendo en UF sumada a una en
+Pesos y UF no se suman entre si: una deuda en UF sumada a una en
 pesos daria un total que no significa nada.
 
 El analisis de sentimiento es por lexico, no un modelo. Alcanza para lo que

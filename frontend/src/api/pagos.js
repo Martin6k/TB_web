@@ -30,3 +30,11 @@ export const pagoPublico = (id, sig) => publico.get(`/payments/public/${id}`, { 
 
 export const confirmarPagoPublico = (id, sig) =>
   publico.post(`/payments/public/${id}/confirm`, null, { params: { sig } }).then((r) => r.data);
+
+/** Con Khipu de verdad: que ms-payments le pregunte a Khipu en que quedo el pago. */
+export const verificarPagoPublico = (id, sig) =>
+  publico.post(`/payments/public/${id}/verificar`, null, { params: { sig } }).then((r) => r.data);
+
+/** El deudor se arrepintio en Khipu: queda fallido, salvo que haya alcanzado a pagar. */
+export const cancelarPagoPublico = (id, sig) =>
+  publico.post(`/payments/public/${id}/cancelar`, null, { params: { sig } }).then((r) => r.data);

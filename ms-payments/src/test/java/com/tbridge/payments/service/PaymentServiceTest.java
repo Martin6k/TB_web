@@ -2,7 +2,9 @@ package com.tbridge.payments.service;
 
 import com.tbridge.common.exception.ApiException;
 import com.tbridge.common.jwt.JwtPrincipal;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.tbridge.payments.client.DebtClient;
+import com.tbridge.payments.client.KhipuClient;
 import com.tbridge.payments.dto.request.CheckoutRequest;
 import com.tbridge.payments.dto.request.WebhookRequest;
 import com.tbridge.payments.dto.response.PaymentResponse;
@@ -58,6 +60,7 @@ class PaymentServiceTest {
     @Mock private com.tbridge.payments.client.WebpayClient webpay;
 
     private final WebhookVerifier firmas = new WebhookVerifier("secreto-de-prueba");
+    private final FirmaDeKhipu firmaDeKhipu = new FirmaDeKhipu("secreto-de-khipu");
     private PaymentService servicio;
 
     @BeforeEach

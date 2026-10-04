@@ -22,9 +22,12 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
+import java.time.ZonedDateTime;
 import java.util.List;
 import java.util.Locale;
 
@@ -41,6 +44,11 @@ import java.util.Locale;
  *   <li><b>El aviso a ms-debt no se manda aqui.</b> Se deja encolado en la
  *       misma transaccion y sale despues, con reintentos.</li>
  * </ol>
+ *
+ * <p><b>Khipu cobra de verdad</b> cuando hay {@code KHIPU_LLAVE}: el deudor
+ * paga con una transferencia en la pagina de Khipu, y el pago se da por hecho
+ * solo cuando Khipu dice que esta conciliado. Webpay y Mercado Pago son
+ * simuladas: una pagina propia confirma con la firma del enlace.
  */
 @Service
 public class PaymentService {
@@ -149,6 +157,20 @@ public class PaymentService {
         return publicUrl + "/pasarela/" + pago.getId() + "?sig=" + firma(pago);
     }
 
+    /** Si este pago lo cobra una pasarela real y no la simulacion. */
+    private boolean cobraDeVerdad(Payment pago) {
+        return pago.getGateway() == Payment.Gateway.khipu && khipu.real();
+    }
+
+    private PaymentResponse respuesta(Payment pago) {
+        return PaymentResponse.from(pago, !cobraDeVerdad(pago));
+    }
+
+    /** El id de la transaccion en Khipu: corto, y con el id del pago adentro. */
+    private static String transaccion(Payment pago) {
+        return "TB-" + pago.getId();
+    }
+
     /**
      * La firma del enlace de pago. No se guarda: se recalcula. Guardar una
      * firma que se puede derivar es una copia mas que puede desincronizarse.
@@ -219,11 +241,11 @@ public class PaymentService {
      * sesiones.
      */
     public PaymentResponse get(JwtPrincipal user, Long id) {
-        return PaymentResponse.from(visible(user, id));
+        return respuesta(visible(user, id));
     }
 
     public PaymentResponse publicGet(Long id, String sig) {
-        return PaymentResponse.from(conFirmaValida(id, sig));
+        return respuesta(conFirmaValida(id, sig));
     }
 
     /** Lo que ve cada quien: el acreedor, SOLO lo suyo. */
@@ -234,7 +256,7 @@ public class PaymentService {
         List<Payment> filas = user.isCreditor()
                 ? payments.findByCreditorRutOrderByCreatedAtDesc(user.rut())
                 : payments.findByDebtorRutOrderByCreatedAtDesc(user.rut());
-        return filas.stream().map(PaymentResponse::from).toList();
+        return filas.stream().map(this::respuesta).toList();
     }
 
     /** El libro de un pago, para el panel y para auditar. */
@@ -261,7 +283,128 @@ public class PaymentService {
 
     @Transactional
     public PaymentResponse confirmPublic(Long id, String sig) {
-        return confirmar(conFirmaValida(id, sig), PaymentEvent.Source.portal, null, null);
+        Payment pago = conFirmaValida(id, sig);
+        //  La confirmacion "a mano" es la de la pasarela simulada. Un pago de
+        //  Khipu lo confirma solo Khipu: si no, cualquiera con el enlace podria
+        //  darlo por pagado sin pagar.
+        if (cobraDeVerdad(pago)) {
+            throw new ApiException(HttpStatus.CONFLICT, "Este pago lo confirma Khipu, al terminar de pagar alla");
+        }
+        return confirmar(pago, PaymentEvent.Source.portal, null, null, null);
+    }
+
+    // ------------------------------------------------------------------
+    //  Khipu
+    // ------------------------------------------------------------------
+
+    /**
+     * Le pregunta a Khipu en que va el pago. Lo llama la pagina del resultado,
+     * a la que Khipu devuelve al deudor: Khipu no dice nada al devolverlo, asi
+     * que hay que preguntar. Un pago simulado o ya cerrado se devuelve tal cual.
+     */
+    @Transactional
+    public PaymentResponse verificar(Long id, String sig) {
+        Payment pago = conFirmaValida(id, sig);
+        if (cobraDeVerdad(pago)) {
+            conciliar(pago);
+        }
+        return respuesta(pago);
+    }
+
+    /**
+     * El deudor se arrepintio en Khipu y volvio por la {@code cancel_url}.
+     * Antes de darlo por fallido se le pregunta a Khipu: si alcanzo a pagar,
+     * el pago vale.
+     */
+    @Transactional
+    public PaymentResponse cancelar(Long id, String sig) {
+        Payment pago = conFirmaValida(id, sig);
+        if (cobraDeVerdad(pago)) {
+            conciliar(pago);
+            if (pago.getStatus() == Payment.Status.created) {
+                fallido(pago, null);
+            }
+        }
+        return respuesta(pago);
+    }
+
+    /**
+     * El aviso de Khipu: un pago se concilio. Solo llega si DataBridge tiene
+     * una direccion publica ({@code KHIPU_URL_AVISOS}). No se aplica lo que
+     * dice: se verifica su firma y se le pregunta a Khipu, asi que un aviso
+     * falso o repetido no cobra nada.
+     */
+    @Transactional
+    public void avisoDeKhipu(String cuerpo, String firma, String paymentId) {
+        if (!firmaDeKhipu.valida(firma, cuerpo)) {
+            throw new ApiException(HttpStatus.UNAUTHORIZED, "Firma de Khipu invalida");
+        }
+        if (paymentId == null || paymentId.isBlank()) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "El aviso no dice que pago es");
+        }
+        Payment pago = payments.findByGatewayAndGatewayTxnId(Payment.Gateway.khipu, paymentId.trim())
+                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Khipu aviso un pago que no existe"));
+        conciliar(pago);
+    }
+
+    /**
+     * Los cobros de Khipu abiertos: se le pregunta a Khipu por cada uno. Asi
+     * un pago se registra aunque el deudor cierre la ventana antes de volver,
+     * y sin depender del aviso, que en local no puede llegar. El que paso el
+     * plazo sin pagarse queda vencido. Devuelve cuantos se cerraron.
+     */
+    @Transactional
+    public int conciliarPendientes() {
+        if (!khipu.real()) {
+            return 0;
+        }
+        int cerrados = 0;
+        Instant limite = Instant.now().minus(venceEn);
+        for (Payment pago : payments.findByGatewayAndStatus(Payment.Gateway.khipu, Payment.Status.created)) {
+            try {
+                conciliar(pago);
+            } catch (ApiException khipuNoResponde) {
+                continue;
+            }
+            if (pago.getStatus() == Payment.Status.created && pago.getCreatedAt().isBefore(limite)) {
+                pago.setStatus(Payment.Status.expired);
+                payments.save(pago);
+                eventos.save(PaymentEvent.de(pago.getId(), PaymentEvent.Type.expired, PaymentEvent.Source.webhook));
+            }
+            if (pago.getStatus() != Payment.Status.created) {
+                cerrados++;
+            }
+        }
+        return cerrados;
+    }
+
+    /**
+     * Lo que dice Khipu, aplicado al pago. Pagado solo si Khipu lo concilio,
+     * el monto es el que se cobro y la transaccion es la nuestra; terminado
+     * sin plata, fallido; todavia en curso, no cambia nada.
+     */
+    private void conciliar(Payment pago) {
+        if (pago.getStatus() != Payment.Status.created || pago.getGatewayTxnId() == null) {
+            return;
+        }
+        KhipuClient.Estado estado = khipu.estado(pago.getGatewayTxnId());
+        String crudo = estado.crudo() == null ? null : estado.crudo().toString();
+        boolean calza = estado.amount() != null && estado.amount().compareTo(BigDecimal.valueOf(pago.getAmountClp())) == 0
+                && transaccion(pago).equals(estado.transactionId());
+        if (estado.pagado() && calza) {
+            confirmar(pago, PaymentEvent.Source.webhook, pago.getGatewayTxnId(), null, crudo);
+        } else if (estado.sinCobro() || estado.pagado()) {
+            //  Pagado pero por otro monto u otra transaccion no se acepta: no
+            //  es el cobro que se abrio.
+            fallido(pago, crudo);
+        }
+    }
+
+    private void fallido(Payment pago, String crudo) {
+        pago.setStatus(Payment.Status.failed);
+        payments.save(pago);
+        eventos.save(PaymentEvent.de(pago.getId(), PaymentEvent.Type.failed, PaymentEvent.Source.webhook)
+                .conRespuesta(crudo));
     }
 
     /**
@@ -290,7 +433,10 @@ public class PaymentService {
                     .conFirma(false));
             throw new ApiException(HttpStatus.UNAUTHORIZED, "Firma criptografica invalida");
         }
-        return confirmar(pago, PaymentEvent.Source.webhook, aviso.txnId(), true);
+        if (cobraDeVerdad(pago)) {
+            throw new ApiException(HttpStatus.CONFLICT, "Este pago lo confirma Khipu");
+        }
+        return confirmar(pago, PaymentEvent.Source.webhook, aviso.txnId(), true, null);
     }
 
     /** El monto en pesos, con el valor de la UF del dia en Chile si la deuda es en UF. */
@@ -304,10 +450,11 @@ public class PaymentService {
         }
     }
 
-    private PaymentResponse confirmar(Payment pago, PaymentEvent.Source origen, String txnId, Boolean firmaOk) {
+    private PaymentResponse confirmar(Payment pago, PaymentEvent.Source origen, String txnId, Boolean firmaOk,
+                                      String respuestaDeLaPasarela) {
         //  Idempotencia: el pago ya cobrado se devuelve tal cual.
         if (pago.getStatus() == Payment.Status.paid) {
-            return PaymentResponse.from(pago);
+            return respuesta(pago);
         }
         //  Solo los cobros abiertos antes de que se fijaran al abrir.
         if (pago.getAmountClp() == null) {
@@ -320,7 +467,8 @@ public class PaymentService {
 
         try {
             payments.save(pago);
-            eventos.save(PaymentEvent.de(pago.getId(), PaymentEvent.Type.paid, origen).conFirma(firmaOk));
+            eventos.save(PaymentEvent.de(pago.getId(), PaymentEvent.Type.paid, origen).conFirma(firmaOk)
+                    .conRespuesta(respuestaDeLaPasarela));
             //  El aviso queda encolado aqui, en la misma transaccion. Si
             //  ms-debt esta caido, el pago igual quedo guardado.
             if (avisos.findByPaymentId(pago.getId()).isEmpty()) {
@@ -330,7 +478,7 @@ public class PaymentService {
             //  El unico de la pasarela salto: ese aviso ya se habia aplicado.
             throw new ApiException(HttpStatus.CONFLICT, "Ese pago de la pasarela ya estaba registrado");
         }
-        return PaymentResponse.from(pago);
+        return respuesta(pago);
     }
 
     // ------------------------------------------------------------------

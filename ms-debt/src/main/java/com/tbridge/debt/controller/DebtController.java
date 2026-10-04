@@ -4,7 +4,9 @@ import com.tbridge.common.exception.ApiError;
 import com.tbridge.common.jwt.JwtPrincipal;
 import com.tbridge.debt.assembler.DebtModelAssembler;
 import com.tbridge.debt.config.OpenApiConfig;
+import com.tbridge.debt.dto.request.DisputaRequest;
 import com.tbridge.debt.dto.request.RepactRequest;
+import com.tbridge.debt.dto.request.ResolucionDisputaRequest;
 import com.tbridge.debt.dto.response.CodigoEnviadoResponse;
 import com.tbridge.debt.dto.response.DebtDetailResponse;
 import com.tbridge.debt.dto.response.DebtSummaryResponse;
@@ -12,6 +14,7 @@ import com.tbridge.debt.dto.response.SimulacionResponse;
 import com.tbridge.debt.service.AccesoService;
 import com.tbridge.debt.service.CertificateService;
 import com.tbridge.debt.service.DebtService;
+import com.tbridge.debt.service.DisputaService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Content;
@@ -49,13 +52,15 @@ public class DebtController {
     private final DebtService debts;
     private final CertificateService certificates;
     private final AccesoService acceso;
+    private final DisputaService disputas;
     private final DebtModelAssembler enlaces;
 
     public DebtController(DebtService debts, CertificateService certificates, AccesoService acceso,
-                          DebtModelAssembler enlaces) {
+                          DisputaService disputas, DebtModelAssembler enlaces) {
         this.debts = debts;
         this.certificates = certificates;
         this.acceso = acceso;
+        this.disputas = disputas;
         this.enlaces = enlaces;
     }
 
@@ -117,6 +122,39 @@ public class DebtController {
                                                   @PathVariable Long id,
                                                   @Valid @RequestBody RepactRequest pedido) {
         return enlaces.toModel(debts.applyRepact(user, id, pedido.mesesOPorOmision()));
+    }
+
+    @PostMapping("/{id}/disputa")
+    @Operation(summary = "No reconozco esta deuda",
+            description = """
+                    Solo el deudor, con un motivo: no_reconoce, ya_pagada, monto_incorrecto u otro. Mientras la                     empresa la revisa, la deuda queda `disputed`: no se paga ni se repacta, y no le llegan                     recordatorios. La cadena se entera por el evento `deuda.disputada`, que lleva solo el motivo.""")
+    @ApiResponse(responseCode = "200", description = "La deuda, en disputa")
+    @ApiResponse(responseCode = "400", description = "Un motivo que no existe",
+            content = @Content(schema = @Schema(implementation = ApiError.class)))
+    @ApiResponse(responseCode = "403", description = "Quien disputa no es el deudor",
+            content = @Content(schema = @Schema(implementation = ApiError.class)))
+    @ApiResponse(responseCode = "409", description = "La deuda ya esta pagada, retirada o en revision",
+            content = @Content(schema = @Schema(implementation = ApiError.class)))
+    public EntityModel<DebtDetailResponse> disputar(@Parameter(hidden = true) @AuthenticationPrincipal JwtPrincipal user,
+                                                    @PathVariable Long id,
+                                                    @Valid @RequestBody DisputaRequest pedido) {
+        return enlaces.toModel(disputas.disputar(user, id, pedido));
+    }
+
+    @PostMapping("/{id}/disputa/resolucion")
+    @Operation(summary = "Resolver una disputa",
+            description = """
+                    Solo la empresa que opera la deuda. `reanudar`: la deuda corresponde y vuelve a cobranza,                     con su convenio si tenia uno (evento `deuda.reanudada`). `retirar`: no corresponde y sale de                     la cobranza con el motivo `disputa_resuelta` (evento `deuda.retirada`).""")
+    @ApiResponse(responseCode = "200", description = "La deuda, resuelta")
+    @ApiResponse(responseCode = "403", description = "Quien resuelve no es la empresa que opera la deuda",
+            content = @Content(schema = @Schema(implementation = ApiError.class)))
+    @ApiResponse(responseCode = "409", description = "La deuda no esta en disputa",
+            content = @Content(schema = @Schema(implementation = ApiError.class)))
+    public EntityModel<DebtDetailResponse> resolverDisputa(
+            @Parameter(hidden = true) @AuthenticationPrincipal JwtPrincipal user,
+            @PathVariable Long id,
+            @Valid @RequestBody ResolucionDisputaRequest pedido) {
+        return enlaces.toModel(disputas.resolver(user, id, pedido));
     }
 
     @PostMapping("/{id}/codigo")

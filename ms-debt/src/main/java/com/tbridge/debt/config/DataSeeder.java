@@ -30,17 +30,24 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Los datos de la demo: la cartera que APOFYX le entrego a DataBridge por
- * cuenta de Patrimonio Inmuebles, con cada deudor en una situacion distinta.
+ * cuenta de tres acreedores de rubros distintos, con cada deudor en una
+ * situacion distinta. DataBridge no es de un rubro: cobra lo que le entregue
+ * la agencia, sea un arriendo, un arancel o un tratamiento dental.
  *
  * <p>Es la misma historia que cuentan los datos de ejemplo de Patrimonio y de
- * APOFYX, vista desde aca. Hubo dos carteras: la del corte del 18 de agosto y
- * la del 18 de septiembre. DataBridge cobra desde dos meses impagos, asi que
- * en agosto rechazo a Felipe y a Carolina (debian uno), y en septiembre a
- * Valentina (debe uno). Lo que paso despues:
+ * APOFYX, vista desde aca. DataBridge cobra desde 30 dias de mora, contados
+ * desde el cargo impago mas antiguo.
+ *
+ * <p><b>Patrimonio Inmuebles</b> (arriendos) entrego dos carteras: la del
+ * corte del 18 de agosto y la del 18 de septiembre. En agosto DataBridge
+ * rechazo a Felipe y a Carolina (debian solo agosto: 13 dias), y en
+ * septiembre a Valentina (debe solo septiembre: 13 dias). Lo que paso despues:
  *
  * <ul>
  *   <li><b>Felipe</b> acepto un convenio de 6 cuotas y lleva 3 pagadas.</li>
@@ -53,6 +60,17 @@ import java.util.List;
  *       pago la primera cuota: es el convenio en riesgo.</li>
  *   <li><b>Daniela</b> acepto 3 cuotas y las pago todas juntas.</li>
  * </ul>
+ *
+ * <p><b>Instituto Andes</b> (aranceles mensuales) subio su planilla con el
+ * corte del 18 de septiembre. DataBridge rechazo a Antonia (debe septiembre:
+ * 8 dias). <b>Benjamin</b> debe tres aranceles y <b>Josefina</b> pago los dos
+ * suyos con Webpay.
+ *
+ * <p><b>Clinica Dental Sonrisa Norte</b> (tratamientos de un solo cargo)
+ * entrego su cartera por API con el mismo corte. <b>Patricio</b> debe una
+ * ortodoncia de julio y <b>Fernanda</b> acepto 6 cuotas por un implante y pago
+ * la primera. Las dos son deudas de un solo cargo: con la regla de meses
+ * impagos que tenia DataBridge antes se habrian rechazado.
  *
  * <p>Al arrancar se agrega el deudor que falte, sin tocar los que ya estan: una
  * base con datos propios no pierde nada.
@@ -83,6 +101,8 @@ public class DataSeeder implements CommandLineRunner {
     private Organization apofyx;
     private Batch agosto;
     private Batch septiembre;
+    private Organization andes;
+    private Organization sonrisa;
 
     public DataSeeder(
             OrganizationRepository organizations,
@@ -117,8 +137,8 @@ public class DataSeeder implements CommandLineRunner {
         }
         patrimonio = organizacion("76418902-7", "Patrimonio Inmuebles SpA", "Patrimonio Inmuebles",
                 Organization.Kind.creditor);
-        agosto = lote("APX-2026-08-19-003", LocalDate.of(2026, 8, 18), cl("2026-08-19T10:12"), 8, 6);
-        septiembre = lote("APX-2026-09-19-004", LocalDate.of(2026, 9, 18), cl("2026-09-19T10:05"), 8, 7);
+        agosto = lote(patrimonio, "APX-2026-08-19-003", LocalDate.of(2026, 8, 18), cl("2026-08-19T10:12"), 8, 6);
+        septiembre = lote(patrimonio, "APX-2026-09-19-004", LocalDate.of(2026, 9, 18), cl("2026-09-19T10:05"), 8, 7);
 
         felipe();
         nandu();
@@ -128,6 +148,9 @@ public class DataSeeder implements CommandLineRunner {
         laEspiga();
         ignacio();
         daniela();
+
+        institutoAndes();
+        sonrisaNorte();
     }
 
     // ------------------------------------------------------------------
@@ -135,7 +158,7 @@ public class DataSeeder implements CommandLineRunner {
     // ------------------------------------------------------------------
 
     private void felipe() {
-        Debt deuda = deuda("CTR-2025-014", deudor("16482337-7", Debtor.Kind.person, "Felipe Rojas Muñoz",
+        Debt deuda = arriendo("CTR-2025-014", deudor("16482337-7", Debtor.Kind.person, "Felipe Rojas Muñoz",
                         "felipe.rojas@correo.cl", "+56987654321"),
                 Debt.Currency.CLP, "Arriendo mensual", "Depto 1204, Av. Irarrázaval 2450, Ñuñoa",
                 septiembre, septiembre, List.of(
@@ -154,7 +177,7 @@ public class DataSeeder implements CommandLineRunner {
     }
 
     private void nandu() {
-        Debt deuda = deuda("CTR-2024-007", deudor("76991245-2", Debtor.Kind.company, "Comercial Ñandú SpA",
+        Debt deuda = arriendo("CTR-2024-007", deudor("76991245-2", Debtor.Kind.company, "Comercial Ñandú SpA",
                         "administracion@nandu.cl", null),
                 Debt.Currency.UF, "Arriendo local comercial", "Local 3, Av. Italia 1320, Providencia",
                 agosto, septiembre, List.of(
@@ -173,7 +196,7 @@ public class DataSeeder implements CommandLineRunner {
     }
 
     private void tomas() {
-        Debt deuda = deuda("CTR-2025-022", deudor("15227640-0", Debtor.Kind.person, "Tomás Fuentes Leiva",
+        Debt deuda = arriendo("CTR-2025-022", deudor("15227640-0", Debtor.Kind.person, "Tomás Fuentes Leiva",
                         "tomas.fuentes@correo.cl", "+56955512340"),
                 Debt.Currency.CLP, "Arriendo mensual", "Los Castaños 455, La Florida",
                 agosto, septiembre, List.of(
@@ -191,7 +214,7 @@ public class DataSeeder implements CommandLineRunner {
     }
 
     private void rodrigo() {
-        Debt deuda = deuda("CTR-2025-019", deudor("14583206-3", Debtor.Kind.person, "Rodrigo Pérez Contreras",
+        Debt deuda = arriendo("CTR-2025-019", deudor("14583206-3", Debtor.Kind.person, "Rodrigo Pérez Contreras",
                         "rodrigo.perez@correo.cl", "+56961238890"),
                 Debt.Currency.CLP, "Arriendo mensual", "Depto 1507, Santa Isabel 470, Santiago",
                 agosto, septiembre, List.of(
@@ -211,7 +234,7 @@ public class DataSeeder implements CommandLineRunner {
     }
 
     private void carolina() {
-        Debt deuda = deuda("CTR-2026-012", deudor("19230418-0", Debtor.Kind.person, "Carolina Muñoz Vera",
+        Debt deuda = arriendo("CTR-2026-012", deudor("19230418-0", Debtor.Kind.person, "Carolina Muñoz Vera",
                         "carolina.munoz@correo.cl", "+56978812034"),
                 Debt.Currency.CLP, "Arriendo mensual", "Depto 42, Av. Pajaritos 2810, Maipú",
                 septiembre, septiembre, List.of(
@@ -229,7 +252,7 @@ public class DataSeeder implements CommandLineRunner {
     }
 
     private void laEspiga() {
-        Debt deuda = deuda("CTR-2024-019", deudor("76284519-9", Debtor.Kind.company, "Panadería La Espiga Ltda.",
+        Debt deuda = arriendo("CTR-2024-019", deudor("76284519-9", Debtor.Kind.company, "Panadería La Espiga Ltda.",
                         "contacto@laespiga.cl", "+56229876543"),
                 Debt.Currency.UF, "Arriendo local comercial",
                 "Local 12, Gran Avenida José Miguel Carrera 5540, San Miguel",
@@ -252,7 +275,7 @@ public class DataSeeder implements CommandLineRunner {
     }
 
     private void ignacio() {
-        Debt deuda = deuda("CTR-2025-027", deudor("17893456-2", Debtor.Kind.person, "Ignacio Tapia Rojas",
+        Debt deuda = arriendo("CTR-2025-027", deudor("17893456-2", Debtor.Kind.person, "Ignacio Tapia Rojas",
                         "ignacio.tapia@correo.cl", "+56987120045"),
                 Debt.Currency.CLP, "Arriendo mensual", "Depto 204, Portugal 48, Santiago",
                 agosto, agosto, List.of(
@@ -272,7 +295,7 @@ public class DataSeeder implements CommandLineRunner {
     }
 
     private void daniela() {
-        Debt deuda = deuda("CTR-2026-015", deudor("18642975-3", Debtor.Kind.person, "Daniela Cáceres Flores",
+        Debt deuda = arriendo("CTR-2026-015", deudor("18642975-3", Debtor.Kind.person, "Daniela Cáceres Flores",
                         "daniela.caceres@correo.cl", "+56954410987"),
                 Debt.Currency.CLP, "Arriendo mensual", "Depto 713, Av. Vicuña Mackenna 4860, Macul",
                 agosto, septiembre, List.of(
@@ -293,13 +316,106 @@ public class DataSeeder implements CommandLineRunner {
     }
 
     // ------------------------------------------------------------------
+    //  Instituto Andes: aranceles mensuales, por planilla
+    // ------------------------------------------------------------------
+
+    private void institutoAndes() {
+        andes = organizacion("77812341-K", "Instituto Profesional Andes Ltda.", "Instituto Andes",
+                Organization.Kind.creditor);
+        //  Tres en la planilla; Antonia debia solo septiembre (8 dias) y no entro.
+        Batch lote = lote(andes, "APX-2026-09-19-005", LocalDate.of(2026, 9, 18), cl("2026-09-19T10:20"), 3, 2);
+
+        Debt benjamin = deuda(andes, "AND-2025-0412", deudor("21345678-4", Debtor.Kind.person, "Benjamín Araya Toro",
+                        "benjamin.araya@correo.cl", "+56944120387"),
+                Debt.Currency.CLP, "Arancel Técnico en Enfermería",
+                referencias("matricula", "AND-2025-0412", "carrera", "Técnico en Enfermería"), lote, List.of(
+                        cargo("Arancel julio", "2026-07", "185000", "2026-07-10"),
+                        cargo("Arancel agosto", "2026-08", "185000", "2026-08-10"),
+                        cargo("Arancel septiembre", "2026-09", "185000", "2026-09-10")));
+        if (benjamin != null) {
+            cuota(benjamin, 1, "2026-09-10", "555000", Installment.Status.pending, null, null);
+            invitacion(benjamin, "2026-09-19T10:20", "be************@correo.cl");
+            cerrar(benjamin, Debt.Status.open, "2026-09-19T10:20");
+        }
+
+        Debt josefina = deuda(andes, "AND-2024-0931", deudor("20876543-4", Debtor.Kind.person, "Josefina Vidal Cortés",
+                        "josefina.vidal@correo.cl", "+56977345120"),
+                Debt.Currency.CLP, "Arancel Ingeniería en Informática",
+                referencias("matricula", "AND-2024-0931", "carrera", "Ingeniería en Informática"), lote, List.of(
+                        cargo("Arancel agosto", "2026-08", "185000", "2026-08-10"),
+                        cargo("Arancel septiembre", "2026-09", "185000", "2026-09-10")));
+        if (josefina != null) {
+            List<Installment> total = List.of(cuota(josefina, 1, "2026-09-10", "370000",
+                    Installment.Status.pending, null, null));
+            invitacion(josefina, "2026-09-19T10:20", "jo************@correo.cl");
+            evento(josefina, DebtEvent.Type.portal_entered, DebtEvent.Actor.debtor, "2026-09-22T20:02", null, null);
+            pago(josefina, total, List.of(0), "2026-09-22T20:10", "webpay", "wp-91ce07", null, null);
+            evento(josefina, DebtEvent.Type.settled, DebtEvent.Actor.system, "2026-09-22T20:10", null, null);
+            cerrar(josefina, Debt.Status.paid, "2026-09-22T20:10");
+        }
+    }
+
+    // ------------------------------------------------------------------
+    //  Sonrisa Norte: tratamientos dentales de un solo cargo, por API
+    // ------------------------------------------------------------------
+
+    private void sonrisaNorte() {
+        sonrisa = organizacion("76998877-7", "Servicios Dentales Sonrisa Norte SpA", "Clínica Dental Sonrisa Norte",
+                Organization.Kind.creditor);
+        Batch lote = lote(sonrisa, "APX-2026-09-19-006", LocalDate.of(2026, 9, 18), cl("2026-09-19T10:25"), 2, 2);
+
+        Debt patricio = deuda(sonrisa, "SN-2026-118", deudor("13579246-2", Debtor.Kind.person, "Patricio Muñoz Salas",
+                        "patricio.munoz@correo.cl", "+56951287734"),
+                Debt.Currency.CLP, "Tratamiento de ortodoncia",
+                referencias("presupuesto", "SN-2026-118", "tratamiento", "Ortodoncia"), lote, List.of(
+                        cargo("Ortodoncia, saldo del presupuesto", null, "890000", "2026-07-05")));
+        if (patricio != null) {
+            cuota(patricio, 1, "2026-07-05", "890000", Installment.Status.pending, null, null);
+            invitacion(patricio, "2026-09-19T10:25", "pa************@correo.cl");
+            cerrar(patricio, Debt.Status.open, "2026-09-19T10:25");
+        }
+
+        Debt fernanda = deuda(sonrisa, "SN-2026-093", deudor("16789012-1", Debtor.Kind.person, "Fernanda Silva Rojas",
+                        "fernanda.silva@correo.cl", "+56962054418"),
+                Debt.Currency.CLP, "Implante dental",
+                referencias("presupuesto", "SN-2026-093", "tratamiento", "Implante dental"), lote, List.of(
+                        cargo("Implante dental", null, "1450000", "2026-06-20")));
+        if (fernanda != null) {
+            cuota(fernanda, 1, "2026-06-20", "1450000", Installment.Status.void_, null, null);
+            invitacion(fernanda, "2026-09-19T10:25", "fe************@correo.cl");
+            evento(fernanda, DebtEvent.Type.portal_entered, DebtEvent.Actor.debtor, "2026-09-21T10:52", null, null);
+            List<Installment> plan = convenio(fernanda, "2026-09-21T11:00", 6, "241666", "241670", "2026-10-21");
+            pago(fernanda, plan, List.of(0), "2026-09-21T11:05", "khipu", "kh-5108-0921", null, null);
+            cerrar(fernanda, Debt.Status.repacted, "2026-09-21T11:05");
+        }
+    }
+
+    // ------------------------------------------------------------------
     //  Como se arma cada pieza
     // ------------------------------------------------------------------
 
-    private record Cargo(String concepto, String periodo, BigDecimal monto) {}
+    /** Un cargo, con su periodo si es un cobro mensual. Los arriendos de Patrimonio vencen el 5. */
+    private record Cargo(String concepto, String periodo, BigDecimal monto, LocalDate vence) {}
 
     private static Cargo cargo(String concepto, String periodo, String monto) {
-        return new Cargo(concepto, periodo, new BigDecimal(monto));
+        return cargo(concepto, periodo, monto, periodo + "-05");
+    }
+
+    private static Cargo cargo(String concepto, String periodo, String monto, String vence) {
+        return new Cargo(concepto, periodo, new BigDecimal(monto), LocalDate.parse(vence));
+    }
+
+    private static Map<String, String> referencias(String... claveValor) {
+        Map<String, String> refs = new LinkedHashMap<>();
+        for (int i = 0; i < claveValor.length; i += 2) {
+            refs.put(claveValor[i], claveValor[i + 1]);
+        }
+        return refs;
+    }
+
+    /** La invitacion que sale sola cuando la deuda entra (InvitacionService). */
+    private void invitacion(Debt deuda, String cuando, String destino) {
+        evento(deuda, DebtEvent.Type.code_sent, DebtEvent.Actor.system, cuando, null, destino);
     }
 
     private static Instant cl(String fechaYHora) {
@@ -317,11 +433,12 @@ public class DataSeeder implements CommandLineRunner {
         });
     }
 
-    private Batch lote(String idExterno, LocalDate corte, Instant recibido, int recibidas, int aceptadas) {
+    private Batch lote(Organization acreedor, String idExterno, LocalDate corte, Instant recibido, int recibidas,
+                       int aceptadas) {
         return batches.findBySenderAndExternalId(apofyx, idExterno).orElseGet(() -> {
             Batch lote = new Batch();
             lote.setSender(apofyx);
-            lote.setCreditor(patrimonio);
+            lote.setCreditor(acreedor);
             lote.setExternalId(idExterno);
             lote.setCutOff(corte);
             lote.setPayloadHash("0".repeat(64));
@@ -345,26 +462,38 @@ public class DataSeeder implements CommandLineRunner {
         });
     }
 
+    /** Un arriendo de Patrimonio: el contrato y la propiedad son sus referencias. */
+    private Debt arriendo(String contrato, Debtor deudor, Debt.Currency moneda, String concepto, String propiedad,
+                          Batch primero, Batch ultimo, List<Cargo> cargos) {
+        return deuda(patrimonio, contrato, deudor, moneda, concepto,
+                referencias("contrato", contrato, "propiedad", propiedad), primero, ultimo, cargos);
+    }
+
+    private Debt deuda(Organization acreedor, String idExterno, Debtor deudor, Debt.Currency moneda, String concepto,
+                       Map<String, String> refs, Batch lote, List<Cargo> cargos) {
+        return deuda(acreedor, idExterno, deudor, moneda, concepto, refs, lote, lote, cargos);
+    }
+
     /**
      * La deuda con sus cargos, tal como llego en su primera cartera. Devuelve
      * null si ya existe: esa se deja como esta.
      */
-    private Debt deuda(String idExterno, Debtor deudor, Debt.Currency moneda, String concepto, String propiedad,
-                       Batch primero, Batch ultimo, List<Cargo> cargos) {
-        if (debts.findByCreditorAndExternalId(patrimonio, idExterno).isPresent()) {
+    private Debt deuda(Organization acreedor, String idExterno, Debtor deudor, Debt.Currency moneda, String concepto,
+                       Map<String, String> refs, Batch primero, Batch ultimo, List<Cargo> cargos) {
+        if (debts.findByCreditorAndExternalId(acreedor, idExterno).isPresent()) {
             return null;
         }
         Debt deuda = new Debt();
-        deuda.setCreditor(patrimonio);
+        deuda.setCreditor(acreedor);
         deuda.setDebtor(deudor);
         deuda.setExternalId(idExterno);
         deuda.setCurrency(moneda);
         deuda.setConcept(concepto);
-        deuda.setRefs("{\"contrato\":\"" + idExterno + "\",\"propiedad\":\"" + propiedad + "\"}");
+        deuda.setRefs(comoJson(refs));
         deuda.setOriginalAmount(cargos.stream().map(Cargo::monto).reduce(BigDecimal.ZERO, BigDecimal::add));
         deuda.setFirstBatch(primero);
         deuda.setLastBatch(ultimo);
-        Instant recibida = primero == agosto ? cl("2026-08-19T10:12") : cl("2026-09-19T10:05");
+        Instant recibida = primero.getReceivedAt();
         deuda.setCreatedAt(recibida);
         deuda.setUpdatedAt(recibida);
         debts.save(deuda);
@@ -375,7 +504,7 @@ public class DataSeeder implements CommandLineRunner {
             fila.setConcept(c.concepto());
             fila.setPeriod(c.periodo());
             fila.setAmount(c.monto());
-            fila.setDueDate(LocalDate.parse(c.periodo() + "-05"));
+            fila.setDueDate(c.vence());
             charges.save(fila);
         }
         //  Lo que registro la primera cartera: en agosto, los cargos hasta agosto.
@@ -474,11 +603,11 @@ public class DataSeeder implements CommandLineRunner {
         debts.save(deuda);
     }
 
-    private String comoJson(DetallePago detalle) {
+    private String comoJson(Object valor) {
         try {
-            return json.writeValueAsString(detalle);
+            return json.writeValueAsString(valor);
         } catch (JsonProcessingException e) {
-            throw new IllegalStateException("No se pudo escribir el detalle de un pago de la demo", e);
+            throw new IllegalStateException("No se pudo escribir en JSON un dato de la demo", e);
         }
     }
 }

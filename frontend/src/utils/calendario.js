@@ -24,7 +24,7 @@ export function descargarCalendario(cuotas) {
       `DTSTART;VALUE=DATE:${dia}`,
       `DTEND;VALUE=DATE:${siguiente}`,
       `SUMMARY:${escapar(`${que}: ${dinero(c.monto, c.moneda)}`)}`,
-      `DESCRIPTION:${escapar(`${c.concepto} con ${c.acreedor}, contrato ${c.externalId}. Paga en el portal escribiendo la dirección tú mismo.`)}`,
+      `DESCRIPTION:${escapar(`${c.concepto} con ${c.acreedor}, ref. ${c.externalId}. Paga en el portal escribiendo la dirección tú mismo.`)}`,
       "BEGIN:VALARM",
       "ACTION:DISPLAY",
       "TRIGGER:-PT15H",

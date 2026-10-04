@@ -4,11 +4,18 @@ import com.tbridge.payments.model.Payment;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.util.List;
+import java.util.Optional;
 
 public interface PaymentRepository extends JpaRepository<Payment, Long> {
 
     /** Lo que ve un deudor: lo suyo, por RUT. */
     List<Payment> findByDebtorRutOrderByCreatedAtDesc(String debtorRut);
+
+    /** El pago de una pasarela por su id de transaccion (en Khipu, el payment_id). */
+    Optional<Payment> findByGatewayAndGatewayTxnId(Payment.Gateway gateway, String gatewayTxnId);
+
+    /** Los pagos de una pasarela en un estado: los cobros de Khipu que siguen abiertos. */
+    List<Payment> findByGatewayAndStatus(Payment.Gateway gateway, Payment.Status status);
 
     /**
      * Lo que ve un acreedor: SOLO lo suyo.

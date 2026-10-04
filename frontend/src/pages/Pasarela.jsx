@@ -1,29 +1,57 @@
 import { useEffect, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
-import { confirmarPagoPublico, pagoPublico } from "../api/pagos";
+import { cancelarPagoPublico, confirmarPagoPublico, pagoPublico, verificarPagoPublico } from "../api/pagos";
 import { dinero } from "../utils/formato";
 import TemaToggle from "../components/TemaToggle";
 import LogoPasarela, { nombreDePasarela } from "../components/LogoPasarela";
 import { CheckAnimado, IconoCandado } from "../components/Iconos";
 
 /**
- * La pasarela simulada. En produccion esta pagina es la de Webpay o Khipu;
- * aca confirma el pago con la misma firma del enlace, que es lo que haria el
- * aviso firmado de la pasarela real.
+ * El pago en su ventana aparte.
+ *
+ * Con una pasarela simulada, confirma el pago con la misma firma del enlace,
+ * que es lo que haria el aviso firmado de la pasarela real. Con Khipu de
+ * verdad el deudor paga en la pagina de Khipu, que lo devuelve aca sin decir
+ * nada: esta pagina le pide a ms-payments que le pregunte a Khipu, y repite
+ * mientras Khipu verifica la transferencia. Si volvio por "cancelar", el pago
+ * queda fallido, salvo que haya alcanzado a pagar.
  */
+const CADA_MS = 4000;
+const INTENTOS = 45;
+
 export default function Pasarela() {
   const { id } = useParams();
   const [params] = useSearchParams();
   const sig = params.get("sig") || "";
+  const cancelado = params.get("cancelado") === "1";
   const [pago, setPago] = useState(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [intentos, setIntentos] = useState(0);
 
   useEffect(() => {
     pagoPublico(id, sig)
-      .then(setPago)
+      .then(async (p) => {
+        if (p.simulada || p.status !== "created") return setPago(p);
+        setPago(await (cancelado ? cancelarPagoPublico(id, sig) : verificarPagoPublico(id, sig)));
+      })
       .catch((err) => setError(err.status === 401 ? "Enlace de pago inválido" : err.message));
-  }, [id, sig]);
+  }, [id, sig, cancelado]);
+
+  // Khipu puede tardar unos segundos en conciliar la transferencia.
+  const verificando = pago && !pago.simulada && pago.status === "created";
+  useEffect(() => {
+    if (!verificando || intentos >= INTENTOS) return;
+    const t = setTimeout(async () => {
+      try {
+        setPago(await verificarPagoPublico(id, sig));
+      } catch {
+        /* Khipu no respondio: se reintenta */
+      }
+      setIntentos((n) => n + 1);
+    }, CADA_MS);
+    return () => clearTimeout(t);
+  }, [verificando, intentos, id, sig]);
 
   async function confirmar() {
     setBusy(true);
@@ -52,6 +80,26 @@ export default function Pasarela() {
             <CheckAnimado />
             <h2>Pago aprobado</h2>
             <p className="hint">Puedes cerrar esta ventana: el portal se actualiza solo.</p>
+          </div>
+        ) : pago?.status === "failed" || pago?.status === "expired" ? (
+          <div style={{ padding: "16px 0 4px" }}>
+            <h2>El pago no se completó</h2>
+            <p className="hint">
+              {pago.status === "expired"
+                ? "Pasó el plazo para pagarlo."
+                : `${nombreDePasarela(pago.gateway)} lo rechazó, o lo anulaste.`}{" "}
+              No se te cobró nada: cierra esta ventana y vuelve a intentarlo desde el portal.
+            </p>
+          </div>
+        ) : verificando ? (
+          <div style={{ padding: "16px 0 4px" }}>
+            <h2>{intentos < INTENTOS ? <><span className="girando" /> Verificando tu pago</> : "Todavía no vemos tu pago"}</h2>
+            <p className="hint">
+              {intentos < INTENTOS
+                ? `${nombreDePasarela(pago.gateway)} está confirmando la transferencia. Toma unos segundos.`
+                : `Si ya pagaste en ${nombreDePasarela(pago.gateway)}, aparecerá solo en el portal en unos minutos.`}{" "}
+              Puedes cerrar esta ventana: el portal se actualiza solo.
+            </p>
           </div>
         ) : pago ? (
           <>

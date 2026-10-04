@@ -52,17 +52,15 @@ public class EventosService {
     public static final String DEUDA_SALDADA = "deuda.saldada";
     public static final String REPACTACION_ACEPTADA = "repactacion.aceptada";
     public static final String DEUDA_RETIRADA = "deuda.retirada";
+    public static final String DEUDA_DISPUTADA = "deuda.disputada";
+    public static final String DEUDA_REANUDADA = "deuda.reanudada";
     public static final String LOTE_PROCESADO = "lote.procesado";
     public static final String CAMPANA_AVANCE = "campana.avance";
 
-    /**
-     * El catalogo del contrato (seccion 8.2). {@code deuda.disputada} se puede
-     * pedir, aunque todavia no se emite: el portal no tiene por ahora como
-     * disputar una deuda.
-     */
+    /** El catalogo del contrato (seccion 8.2): todo se emite. */
     static final Set<String> CATALOGO = Set.of(
             LOTE_PROCESADO, CAMPANA_AVANCE, REPACTACION_ACEPTADA, PAGO_CONFIRMADO,
-            DEUDA_SALDADA, "deuda.disputada", DEUDA_RETIRADA);
+            DEUDA_SALDADA, DEUDA_DISPUTADA, DEUDA_REANUDADA, DEUDA_RETIRADA);
 
     private static final ZoneId CHILE = ZoneId.of("America/Santiago");
     private static final SecureRandom AZAR = new SecureRandom();

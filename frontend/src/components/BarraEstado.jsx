@@ -30,6 +30,7 @@ export function etapaDe(d) {
       return { avance: d.conConvenio ? enConvenio : 0, pasos: ["hecho", d.conConvenio ? "hecho" : "", ""],
                subs: ["", "", "No se cobrará"], texto: "Retirada por el acreedor", detenida: true };
     default:
+      //  En disputa: la empresa revisa lo que dijo el deudor, y mientras tanto no se cobra.
       return { avance: d.conConvenio ? enConvenio : 0, pasos: ["hecho", d.conConvenio ? "actual" : "", ""],
                subs: ["", "", ""], texto: "En revisión", detenida: true };
   }

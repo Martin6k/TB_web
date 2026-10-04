@@ -37,7 +37,6 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Instant;
 import java.time.LocalDate;
-import java.time.YearMonth;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -69,10 +68,12 @@ import java.util.TreeMap;
  * <p><b>Solo deudores morosos, y los detecta DataBridge.</b> El acreedor entrega
  * a todos sus clientes con contrato, y el que esta al dia viene sin cargos
  * (resultado {@code al_dia}, sin guardar nada). Una deuda entra a cobranza
- * cuando tiene al menos {@code app.cartera.min-meses-impagos} meses impagos
- * (dos, por omision). Con menos todavia no es mora, y se rechaza sola con el
- * codigo {@code bajo_umbral_mora}. La que entra le avisa al deudor
- * ({@link InvitacionService}).
+ * cuando su cargo impago mas antiguo lleva al menos
+ * {@code app.cartera.min-dias-mora} dias vencido (30, por omision). Con menos
+ * todavia no es mora, y se rechaza sola con el codigo {@code bajo_umbral_mora}.
+ * Se mide en dias y no en meses impagos: asi sirve igual para un arriendo que
+ * se cobra cada mes que para un tratamiento dental de un solo cargo. La que
+ * entra le avisa al deudor ({@link InvitacionService}).
  *
  * <p><b>Lo que se pago por DataBridge manda.</b> Una deuda en convenio que
  * vuelve en la cartera del mes siguiente conserva su convenio, y una pagada
@@ -96,7 +97,7 @@ public class CarteraIntakeService {
     private final ObjectMapper json;
     private final EventosService eventos;
     private final ApplicationEventPublisher avisos;
-    private final int minMesesImpagos;
+    private final int minDiasMora;
 
     public CarteraIntakeService(
             OrganizationRepository organizations,
@@ -111,10 +112,10 @@ public class CarteraIntakeService {
             ObjectMapper json,
             EventosService eventos,
             ApplicationEventPublisher avisos,
-            @Value("${app.cartera.min-meses-impagos:2}") int minMesesImpagos
+            @Value("${app.cartera.min-dias-mora:30}") int minDiasMora
     ) {
-        if (minMesesImpagos < 1) {
-            throw new IllegalStateException("app.cartera.min-meses-impagos tiene que ser al menos 1");
+        if (minDiasMora < 1) {
+            throw new IllegalStateException("app.cartera.min-dias-mora tiene que ser al menos 1");
         }
         this.organizations = organizations;
         this.mandates = mandates;
@@ -128,12 +129,12 @@ public class CarteraIntakeService {
         this.json = json;
         this.eventos = eventos;
         this.avisos = avisos;
-        this.minMesesImpagos = minMesesImpagos;
+        this.minDiasMora = minDiasMora;
     }
 
-    /** Desde cuantos meses impagos entra una deuda: el alcance de DataBridge. */
-    public int minMesesImpagos() {
-        return minMesesImpagos;
+    /** Desde cuantos dias de mora entra una deuda: el alcance de DataBridge. */
+    public int minDiasMora() {
+        return minDiasMora;
     }
 
     // ------------------------------------------------------------------
@@ -455,7 +456,7 @@ public class CarteraIntakeService {
         boolean todosLeidos = nodoCargos != null && nodoCargos.isArray() && cargos.size() == nodoCargos.size();
 
         //  Una deuda pagada vuelve a cobranza solo con cargos posteriores a los
-        //  que se pagaron: el arrendatario se volvio a atrasar. Con alguno de los
+        //  que se pagaron: el deudor se volvio a atrasar. Con alguno de los
         //  ya pagados seria cobrarle dos veces lo mismo.
         boolean pagada = existente != null && existente.getStatus() == Debt.Status.paid;
         if (pagada && todosLeidos && !soloCargosNuevos(existente, cargos)) {
@@ -465,15 +466,14 @@ public class CarteraIntakeService {
 
         //  El alcance: deudores morosos. Se exige solo al ENTRAR, y una deuda
         //  pagada que vuelve entra de nuevo. Una que ya esta en gestion puede
-        //  volver con menos cargos (el arrendatario pago una parte en la
-        //  oficina), y rechazarla dejaria a DataBridge cobrando un monto que ya
-        //  no existe. Y solo si se leyeron todos los cargos: si alguno venia
-        //  malo, contar los buenos no dice nada.
-        long meses = mesesImpagos(cargos);
-        if ((existente == null || pagada) && todosLeidos && meses < minMesesImpagos) {
-            errores.add(error("cargos", "bajo_umbral_mora", "Tiene " + meses
-                    + (meses == 1 ? " mes impago" : " meses impagos")
-                    + ": DataBridge recibe deudas desde " + minMesesImpagos + " meses impagos"));
+        //  volver con menos cargos (el deudor le pago una parte al acreedor), y
+        //  rechazarla dejaria a DataBridge cobrando un monto que ya no existe. Y
+        //  solo si se leyeron todos los cargos: si alguno venia malo, el mas
+        //  antiguo de los buenos no dice nada.
+        if ((existente == null || pagada) && todosLeidos && mora < minDiasMora) {
+            errores.add(error("cargos", "bajo_umbral_mora", "Tiene " + mora
+                    + (mora == 1 ? " dia de mora" : " dias de mora")
+                    + ": DataBridge recibe deudas desde " + minDiasMora + " dias de mora"));
         }
 
         if (!errores.isEmpty()) {
@@ -488,7 +488,8 @@ public class CarteraIntakeService {
         boolean nueva = existente == null;
         Debt registro = nueva ? new Debt() : existente;
         boolean sinCambios = !nueva && mismosCargos(registro, cargos)
-                && (registro.getStatus() == Debt.Status.open || registro.getStatus() == Debt.Status.repacted)
+                && (registro.getStatus() == Debt.Status.open || registro.getStatus() == Debt.Status.repacted
+                    || registro.getStatus() == Debt.Status.disputed)
                 && registro.getDebtor().getId().equals(deudor.getId());
 
         registro.setCreditor(acreedor);
@@ -698,20 +699,7 @@ public class CarteraIntakeService {
 
     private record CargoLeido(String concepto, String periodo, BigDecimal monto, LocalDate vence) {}
 
-    /**
-     * Cuantos meses distintos se deben. No es lo mismo que cuantos cargos: el
-     * arriendo y el gasto comun de septiembre son dos cargos de un solo mes.
-     * El mes es el {@code periodo} del cargo, o el de su vencimiento si no lo
-     * trae.
-     */
-    private static long mesesImpagos(List<CargoLeido> cargos) {
-        return cargos.stream()
-                .map(c -> vacio(c.periodo()) ? YearMonth.from(c.vence()).toString() : c.periodo())
-                .distinct()
-                .count();
-    }
-
-    /** Los tramos de crm_portfoliohandover en APOFYX, para que los numeros calcen. */
+    /** Los mismos tramos de APOFYX ({@code Debt.tramo} en su app cartera), para que los numeros calcen. */
     static String tramo(long dias) {
         if (dias <= 30) {
             return "1-30";
