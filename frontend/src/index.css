@@ -560,6 +560,40 @@ code, .mono { font-family: var(--mono); font-size: 0.92em; }
   padding-top: 16px;
   border-top: 1px solid var(--line);
 }
+/*  La disputa: el aviso de que la deuda esta en revision, y el formulario para abrirla. */
+.aviso-revision {
+  display: grid;
+  gap: 4px;
+  margin-top: 16px;
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  background: var(--warn-soft);
+  color: var(--ink-2);
+  font-size: 14.5px;
+}
+.aviso-revision b { color: var(--warn); }
+.disputa {
+  display: grid;
+  gap: 12px;
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+.disputa-motivos { display: flex; flex-wrap: wrap; gap: 8px; }
+.disputa-motivos input { position: absolute; opacity: 0; pointer-events: none; }
+.disputa-motivos .chip:has(input:focus-visible) { box-shadow: 0 0 0 4px var(--ring); }
+.disputa textarea {
+  width: 100%;
+  background: var(--paper-2);
+  border: 1px solid var(--line-2);
+  color: var(--ink);
+  border-radius: var(--radius-sm);
+  padding: 11px 14px;
+  font-size: 16px;
+  resize: vertical;
+}
+.disputa textarea:focus { outline: none; border-color: var(--brand); box-shadow: 0 0 0 4px var(--ring); }
+.disputa .deuda-acciones { margin-top: 0; padding-top: 0; border-top: 0; }
 .al-dia { text-align: center; padding: 44px 20px; }
 .al-dia .check-animado { margin: 0 auto 12px; }
 .al-dia h3 { font-size: 22px; margin: 0 0 6px; }

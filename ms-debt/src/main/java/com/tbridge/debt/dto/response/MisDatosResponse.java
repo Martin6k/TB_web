@@ -9,7 +9,7 @@ import java.util.List;
  * Lo que DataBridge sabe del deudor, y de parte de quien.
  *
  * <p>Sirve para que el deudor confirme que la cobranza es legitima: si el
- * correo que aparece aca es el suyo y la empresa es a la que le arrienda, el
+ * correo que aparece aca es el suyo y la empresa es con la que tiene la deuda, el
  * mensaje que recibio es de verdad. El correo y el telefono van a medias: se
  * reconocen sin quedar expuestos en una pantalla ajena.
  */

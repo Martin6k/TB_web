@@ -80,7 +80,7 @@ export default function Historial() {
                   </div>
                   <div className="fila-que">
                     <b>{queSePago(p)}</b>
-                    <span>{p.concepto} con {p.acreedor}, contrato {p.externalId}</span>
+                    <span>{p.concepto} con {p.acreedor}, ref. {p.externalId}</span>
                     <div className="fila-acciones" style={{ justifyContent: "flex-start" }}>
                       <LogoPasarela id={p.pasarela} alto={18} />
                       <button type="button" className="btn btn-ghost btn-sm" disabled={bajando === p.id}

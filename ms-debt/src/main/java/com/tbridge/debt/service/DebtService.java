@@ -159,14 +159,45 @@ public class DebtService {
                             (a, b) -> a.isAfter(b) ? a : b);
                 }
             }
+            Map<Long, DebtSummaryResponse.Disputa> disputas = disputas(cartera);
             return cartera.stream()
                     .map(d -> DebtSummaryResponse.from(d, installments.findByDebtOrderByNumberAsc(d),
-                            enviado.get(d.getId())))
+                            enviado.get(d.getId()), disputas.get(d.getId())))
                     .toList();
         }
         List<Debt> filas = debts.findByDebtorOrderByUpdatedAtDesc(deudorDe(user));
         filas.forEach(this::anotarIngreso);
-        return filas.stream().map(this::resumen).toList();
+        Map<Long, DebtSummaryResponse.Disputa> disputas = disputas(filas);
+        return filas.stream()
+                .map(d -> DebtSummaryResponse.from(d, installments.findByDebtOrderByNumberAsc(d), null,
+                        disputas.get(d.getId())))
+                .toList();
+    }
+
+    /** La disputa abierta de cada deuda que esta en disputa: la ultima que abrio el deudor. */
+    private Map<Long, DebtSummaryResponse.Disputa> disputas(List<Debt> deudas) {
+        List<Debt> enDisputa = deudas.stream().filter(d -> d.getStatus() == Debt.Status.disputed).toList();
+        Map<Long, DebtSummaryResponse.Disputa> porDeuda = new HashMap<>();
+        if (enDisputa.isEmpty()) {
+            return porDeuda;
+        }
+        for (DebtEvent evento : events.findByDebtInAndType(enDisputa, DebtEvent.Type.disputed)) {
+            DebtSummaryResponse.Disputa disputa = new DebtSummaryResponse.Disputa(evento.getReference(),
+                    detalleDe(evento), evento.getOccurredAt());
+            porDeuda.merge(evento.getDebt().getId(), disputa, (a, b) -> a.desde().isAfter(b.desde()) ? a : b);
+        }
+        return porDeuda;
+    }
+
+    private String detalleDe(DebtEvent evento) {
+        if (evento.getDetail() == null) {
+            return null;
+        }
+        try {
+            return json.readTree(evento.getDetail()).path("detalle").asText(null);
+        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+            return null;
+        }
     }
 
     /**
@@ -260,6 +291,9 @@ public class DebtService {
         if (deuda.getStatus() == Debt.Status.withdrawn) {
             throw new ApiException(HttpStatus.CONFLICT, "El acreedor retiro esta deuda de la cobranza");
         }
+        if (deuda.getStatus() == Debt.Status.disputed) {
+            throw new ApiException(HttpStatus.CONFLICT, "La deuda esta en revision: no se repacta mientras tanto");
+        }
 
         RepactPlan plan = repactation.simulate(saldo(deuda), deuda.getCurrency(), months, LocalDate.now().plusMonths(1));
 
@@ -334,6 +368,10 @@ public class DebtService {
     public DebtSnapshotResponse snapshotInterno(Long debtId, List<Long> installmentIds) {
         Debt deuda = debts.findById(debtId)
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Deuda no encontrada"));
+        //  Mientras la empresa revisa la disputa, no se cobra.
+        if (deuda.getStatus() == Debt.Status.disputed) {
+            throw new ApiException(HttpStatus.CONFLICT, "La deuda esta en revision: no se puede pagar mientras tanto");
+        }
         List<Installment> pendientes = installments.findByDebtAndStatus(deuda, Installment.Status.pending).stream()
                 .sorted(EN_ORDEN).toList();
 
@@ -525,7 +563,8 @@ public class DebtService {
 
     /** Con una sola consulta de cuotas: el saldo y el avance salen de la misma lista. */
     private DebtSummaryResponse resumen(Debt deuda) {
-        return DebtSummaryResponse.from(deuda, installments.findByDebtOrderByNumberAsc(deuda));
+        return DebtSummaryResponse.from(deuda, installments.findByDebtOrderByNumberAsc(deuda), null,
+                disputas(List.of(deuda)).get(deuda.getId()));
     }
 
     private DebtDetailResponse detalle(Debt deuda) {

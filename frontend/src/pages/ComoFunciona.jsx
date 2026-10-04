@@ -93,10 +93,10 @@ function ParaDeudores() {
 }
 
 function ParaEmpresas() {
-  const [minimo, setMinimo] = useState(2);
+  const [minimo, setMinimo] = useState(30);
 
   useEffect(() => {
-    opcionesDeCarga().then((o) => setMinimo(o.minMesesImpagos ?? 2)).catch(() => {});
+    opcionesDeCarga().then((o) => setMinimo(o.minDiasMora ?? 30)).catch(() => {});
   }, []);
 
   return (
@@ -112,7 +112,7 @@ function ParaEmpresas() {
         <div className="card aparece" style={{ "--i": 1 }}>
           <Pasos pasos={[
             ["La cartera llega", "Por la API del contrato de integración, desde tu sistema, o cargando el archivo CSV del mismo contrato en Cargar cartera."],
-            ["Entran solo morosos", `Una deuda entra desde ${minimo} meses impagos. Las que no cumplen se rechazan solas, con su motivo: DataBridge no cobra lo que todavía no es mora.`],
+            ["Entran solo morosos", `Una deuda entra cuando su cargo impago más antiguo lleva ${minimo} días vencido, sea un arriendo mensual, un arancel o un tratamiento de un solo cargo. Las que no cumplen se rechazan solas, con su motivo: DataBridge no cobra lo que todavía no es mora.`],
             ["El deudor recibe su código", "Desde la cartera le envías el código a su correo. El código no se muestra aquí: quien lo viera podría entrar en su lugar."],
             ["Paga o pide un convenio", "El deudor paga todo o en 3 a 24 cuotas sin interés. Tú ves en qué va cada deuda: pendiente, en convenio o pago conciliado."],
             ["El pago vuelve a tu sistema", "Cada pago viaja de vuelta como un evento firmado a la dirección que registraste. Aquí lo ves en Pagos recibidos."],
@@ -138,7 +138,7 @@ Content-Type: application/json`}</pre>
           <div className="card aparece" style={{ "--i": 3 }}>
             <h3>Preguntas frecuentes</h3>
             <Preguntas preguntas={[
-              ["¿Por qué se rechazó una deuda?", `Cada rechazo viene con su motivo. Los más comunes: bajo_umbral_mora (menos de ${minimo} meses impagos), cargo_no_vencido (un cargo todavía no vence a la fecha de corte), rut_invalido y sin_canal_contacto (el deudor no trae correo ni teléfono).`],
+              ["¿Por qué se rechazó una deuda?", `Cada rechazo viene con su motivo. Los más comunes: bajo_umbral_mora (menos de ${minimo} días de mora), cargo_no_vencido (un cargo todavía no vence a la fecha de corte), rut_invalido y sin_canal_contacto (el deudor no trae correo ni teléfono).`],
               ["¿Qué es un convenio en riesgo?", "Un convenio con cuotas vencidas sin pagar. Aparecen en Convenios en riesgo, del más atrasado al menos, para que contactes al deudor antes de que el convenio se caiga."],
               ["¿Qué pasa si el deudor paga en nuestra oficina?", "Envía la deuda de nuevo con el saldo menor, o como retiro con motivo pago_directo. DataBridge deja de cobrarla en el acto."],
               ["¿Podemos ver el código del deudor?", "No. El código va directo al correo del deudor y nunca vuelve a la empresa."],

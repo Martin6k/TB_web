@@ -10,6 +10,7 @@ import com.tbridge.debt.model.Debt;
 import com.tbridge.debt.service.AccesoService;
 import com.tbridge.debt.service.CertificateService;
 import com.tbridge.debt.service.DebtService;
+import com.tbridge.debt.service.DisputaService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -62,6 +63,7 @@ class DebtControllerTest {
     @MockitoBean private DebtService debts;
     @MockitoBean private CertificateService certificates;
     @MockitoBean private AccesoService acceso;
+    @MockitoBean private DisputaService disputas;
 
     private String deudor() {
         return "Bearer " + jwt.issue("76991245-2", null, "DEBTOR", null, "76991245-2");
@@ -75,7 +77,7 @@ class DebtControllerTest {
         return new DebtSummaryResponse(3L, "CTR-2024-007", "Patrimonio Inmuebles", "76418902-7",
                 "Comercial Nandu SpA", "76991245-2", "Arriendo local comercial", Debt.Currency.UF,
                 new BigDecimal("115.50"), new BigDecimal("115.50"), BigDecimal.ZERO, estado,
-                Instant.parse("2026-09-24T12:00:00Z"), 0, 1, false, 0, null);
+                Instant.parse("2026-09-24T12:00:00Z"), 0, 1, false, 0, null, null);
     }
 
     @Test
@@ -153,5 +155,50 @@ class DebtControllerTest {
         mvc.perform(get("/api/debts/abc").header("Authorization", deudor()))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error").value("El parametro 'id' no tiene el formato esperado"));
+    }
+
+    // ------------------------------------------------------------------
+    //  La disputa
+    // ------------------------------------------------------------------
+
+    @Test
+    void el_deudor_ve_el_enlace_para_disputar_y_la_empresa_el_de_resolver() throws Exception {
+        when(debts.getFor(any(), eq(3L))).thenReturn(new DebtDetailResponse(deuda(Debt.Status.open),
+                List.of(), List.of(), List.of()));
+        mvc.perform(get("/api/debts/3").header("Authorization", deudor()))
+                .andExpect(jsonPath("$._links.disputar.href").exists())
+                .andExpect(jsonPath("$._links.resolver-disputa").doesNotExist());
+
+        when(debts.getFor(any(), eq(3L))).thenReturn(new DebtDetailResponse(deuda(Debt.Status.disputed),
+                List.of(), List.of(), List.of()));
+        mvc.perform(get("/api/debts/3").header("Authorization", empresa()))
+                .andExpect(jsonPath("$.estado").value("disputed"))
+                .andExpect(jsonPath("$._links.resolver-disputa.href").exists())
+                .andExpect(jsonPath("$._links.enviar-codigo").doesNotExist());
+    }
+
+    @Test
+    void disputar_pide_un_motivo() throws Exception {
+        mvc.perform(post("/api/debts/3/disputa").header("Authorization", deudor())
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"detalle\":\"no es mia\"}"))
+                .andExpect(status().isBadRequest());
+        verify(disputas, never()).disputar(any(), any(), any());
+    }
+
+    @Test
+    void disputar_y_resolver_responden_la_deuda() throws Exception {
+        when(disputas.disputar(any(), eq(3L), any())).thenReturn(new DebtDetailResponse(deuda(Debt.Status.disputed),
+                List.of(), List.of(), List.of()));
+        when(disputas.resolver(any(), eq(3L), any())).thenReturn(new DebtDetailResponse(deuda(Debt.Status.open),
+                List.of(), List.of(), List.of()));
+
+        mvc.perform(post("/api/debts/3/disputa").header("Authorization", deudor())
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"motivo\":\"ya_pagada\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.estado").value("disputed"));
+        mvc.perform(post("/api/debts/3/disputa/resolucion").header("Authorization", empresa())
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"resultado\":\"reanudar\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.estado").value("open"));
     }
 }

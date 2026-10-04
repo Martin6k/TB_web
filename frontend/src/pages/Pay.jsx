@@ -5,7 +5,7 @@ import { abrirCobro, obtenerPago } from "../api/pagos";
 import { dinero, fecha, hoyEnChile } from "../utils/formato";
 import BarraEstado from "../components/BarraEstado";
 import Cargando from "../components/Cargando";
-import LogoPasarela, { PASARELAS } from "../components/LogoPasarela";
+import LogoPasarela, { PASARELAS, nombreDePasarela } from "../components/LogoPasarela";
 import { CheckAnimado, IconoCandado, IconoCheck, IconoFlecha, IconoVolver } from "../components/Iconos";
 
 
@@ -36,12 +36,15 @@ export default function Pay() {
     obtenerDeuda(id).then(setDeuda).catch((err) => setError(err.message));
   }, [id]);
 
-  // Mientras la pasarela no confirma, se consulta el pago.
+  // Mientras la pasarela no confirma, se consulta el pago. Fallido (Khipu lo
+  // rechazo, o el deudor lo anulo) o vencido, no hay nada mas que esperar. El
+  // enlace a la pasarela solo viene al abrir el cobro: se conserva.
   useEffect(() => {
-    if (!pago || pago.status === "paid") return;
+    if (!pago || ["paid", "failed", "expired"].includes(pago.status)) return;
     const t = setInterval(async () => {
       try {
-        setPago(await obtenerPago(pago.id));
+        const nuevo = await obtenerPago(pago.id);
+        setPago((antes) => ({ ...nuevo, checkoutUrl: antes?.checkoutUrl }));
       } catch {
         /* se reintenta en el proximo ciclo */
       }
@@ -64,6 +67,19 @@ export default function Pay() {
   }, [pago?.status, acreditado]);
 
   if (!deuda) return error ? <div className="error">{error}</div> : <Cargando tarjetas={1} />;
+
+  if (deuda.estado === "disputed") {
+    return (
+      <div className="card" style={{ maxWidth: 560 }}>
+        <h2>Esta deuda está en revisión</h2>
+        <p className="hint">
+          Nos dijiste que no corresponde, y {deuda.acreedor} lo está revisando. Mientras tanto no se cobra: si la
+          empresa confirma que corresponde, vuelve a aparecer para pagar.
+        </p>
+        <Link className="btn btn-ghost btn-sm" to="/app"><IconoVolver size={16} /> Volver a mis deudas</Link>
+      </div>
+    );
+  }
 
   const moneda = deuda.moneda;
   const vigentes = (deuda.cuotas || []).filter((c) => c.estado !== "anulada").sort(porVencimiento);
@@ -105,7 +121,7 @@ export default function Pay() {
         <div>
           <span className="eyebrow">{deuda.acreedor}</span>
           <h1>Pagar</h1>
-          <p>{deuda.concepto}, contrato {deuda.externalId}</p>
+          <p>{deuda.concepto}, ref. {deuda.externalId}</p>
         </div>
         <Link className="btn btn-ghost btn-sm" to="/app">
           <IconoVolver size={16} />

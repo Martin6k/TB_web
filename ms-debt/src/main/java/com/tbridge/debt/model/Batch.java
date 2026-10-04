@@ -91,5 +91,6 @@ public class Batch {
     public void setPayloadHash(String payloadHash) { this.payloadHash = payloadHash; }
     public String getResponse() { return response; }
     public void setResponse(String response) { this.response = response; }
+    public Instant getReceivedAt() { return receivedAt; }
     public void setReceivedAt(Instant receivedAt) { this.receivedAt = receivedAt; }
 }

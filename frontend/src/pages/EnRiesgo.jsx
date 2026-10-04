@@ -35,7 +35,7 @@ export default function EnRiesgo() {
 
   function exportar() {
     descargarCsv("convenios-en-riesgo.csv",
-      ["Deudor", "RUT", "Contrato", "Acreedor", "Cuotas vencidas", "Monto vencido", "Moneda", "Vencida desde",
+      ["Deudor", "RUT", "Referencia", "Acreedor", "Cuotas vencidas", "Monto vencido", "Moneda", "Vencida desde",
         "Dias de atraso", "Cuotas pagadas", "Cuotas del convenio", "Saldo"],
       convenios.map((c) => [c.deudor, rutLegible(c.deudorRut), c.externalId, c.acreedor, c.cuotasVencidas,
         montoParaExcel(c.montoVencido, c.moneda), c.moneda, c.vencidaDesde, c.diasAtraso, c.cuotasPagadas,
@@ -88,7 +88,7 @@ export default function EnRiesgo() {
                     <tr key={c.deudaId}>
                       <td>
                         {c.deudor}
-                        <span className="sub">{rutLegible(c.deudorRut)}, contrato {c.externalId}</span>
+                        <span className="sub">{rutLegible(c.deudorRut)}, ref. {c.externalId}</span>
                       </td>
                       <td>
                         <span className={`badge ${c.diasAtraso > 15 ? "badge-peligro" : "badge-warn"}`}>

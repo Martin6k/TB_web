@@ -38,6 +38,11 @@ Proyecto de Capstone. Las empresas, personas, RUT y montos de los ejemplos son f
 Es el reparto de §13.6 del documento de APOFYX: la cartera, la estrategia y el reporte al cliente
 son de APOFYX; el portal, el pago y la conciliación son de DataBridge.
 
+**Patrimonio es el acreedor de ejemplo, no el único.** El contrato no sabe de rubros: el lugar de
+Patrimonio lo ocupa cualquier empresa con cobros. En la demo también están un instituto
+(aranceles mensuales) y una clínica dental (tratamientos de un solo cargo); §6.3 muestra cómo se
+ve la cartera de cada uno.
+
 ### El mismo contrato en cada tramo
 
 **Patrimonio le habla a APOFYX con el mismo formato con que APOFYX le habla a DataBridge.** Una
@@ -47,7 +52,8 @@ De ahí salen tres propiedades:
 - **Cada pieza se puede saltar.** Un acreedor sin agencia le manda su cartera directo a DataBridge
   con el mismo adaptador que usaría con APOFYX.
 - **Cada pieza se puede cambiar.** Otra agencia de cobranza se enchufa a DataBridge igual que
-  APOFYX, y otra inmobiliaria se enchufa a APOFYX igual que Patrimonio.
+  APOFYX, y cualquier otro acreedor —un instituto, una clínica, un gimnasio— se enchufa a APOFYX
+  igual que Patrimonio.
 - **Se escribe una sola vez.** Hay un esquema, un validador y un catálogo de eventos para toda la
   cadena.
 
@@ -228,8 +234,37 @@ En el tramo APOFYX → DataBridge, el lote lleva además:
 | `cargos` | Sí, al registrar | Lo que se debe, desglosado. El `monto` de cada cargo es **lo que se debe hoy** de ese cargo, no el original |
 
 **`referencias` está pensado para la confianza del deudor.** Ver su contrato y la dirección de su
-departamento dentro de un portal al que llegó escribiendo la dirección es justo la evidencia que
-APOFYX no podía dar solo (§13.5 de su documento).
+departamento, su número de matrícula o el presupuesto de su tratamiento, dentro de un portal al
+que llegó escribiendo la dirección, es justo la evidencia que APOFYX no podía dar solo (§13.5 de
+su documento).
+
+**Cualquier rubro.** Los mismos campos sirven para cualquier cobro. Lo que cambia es qué pone cada
+acreedor en ellos:
+
+| Rubro | `id_externo` | `concepto` | `cargos` | `referencias` |
+| --- | --- | --- | --- | --- |
+| Arriendos (Patrimonio) | El contrato | Arriendo mensual | Un cargo por mes, con `periodo` | Contrato y propiedad |
+| Aranceles (Instituto Andes) | La matrícula | Arancel de la carrera | Un cargo por mes, con `periodo` | Matrícula y carrera |
+| Tratamientos (Sonrisa Norte) | El presupuesto | El tratamiento | **Un solo cargo**, sin `periodo` | Presupuesto y tratamiento |
+| Planes mensuales (un gimnasio, un ISP) | El socio o el servicio | El plan | Un cargo por mes, con `periodo` | Plan y sucursal |
+
+Una deuda de un solo cargo se ve así. Lleva 75 días de mora al corte, y entra igual que un
+arriendo de dos meses: DataBridge mide la mora en días, no en meses impagos (`bajo_umbral_mora`,
+§6.4).
+
+```json
+{
+  "id_externo": "SN-2026-118",
+  "deudor": { "rut": "13579246-2", "tipo": "persona", "nombre": "Patricio Muñoz Salas",
+              "correo": "patricio.munoz@correo.cl" },
+  "moneda": "CLP",
+  "concepto": "Tratamiento de ortodoncia",
+  "referencias": { "presupuesto": "SN-2026-118", "tratamiento": "Ortodoncia" },
+  "cargos": [
+    { "concepto": "Ortodoncia, saldo del presupuesto", "monto": 890000, "fecha_vencimiento": "2026-07-05" }
+  ]
+}
+```
 
 ### 6.4 Reglas de validación
 
@@ -246,7 +281,7 @@ Las que no caben en JSON Schema las aplica cada receptor al recibir:
 | `deuda_no_encontrada` | Se pide `retirar` una deuda que el receptor no tiene |
 | `deuda_saldada` | Se pide retirar una deuda que ya se pagó, o actualizarla con algún cargo que ya se pagó. Con cargos posteriores a los pagados no es un error: el deudor se volvió a atrasar, y la deuda vuelve a cobranza |
 | `campana_desconocida` | El `mandato` apunta a una campaña que esa agencia no registró para ese acreedor |
-| `bajo_umbral_mora` | **Solo DataBridge.** Una deuda nueva —o una pagada que vuelve— con menos meses impagos que su umbral (dos, por omisión): DataBridge cobra a deudores morosos. Se cuentan meses distintos (el `periodo` del cargo, o el mes de su vencimiento), no cargos. Una deuda que ya está en gestión puede volver con menos: el deudor pagó una parte directo |
+| `bajo_umbral_mora` | **Solo DataBridge.** Una deuda nueva —o una pagada que vuelve— cuyo cargo impago más antiguo lleva menos días vencido que su umbral (30, por omisión, `MIN_DIAS_MORA`): DataBridge cobra a deudores morosos. Se mide en días y no en meses impagos para que sirva en cualquier rubro, también para una deuda de un solo cargo. Una deuda que ya está en gestión puede volver con menos: el deudor pagó una parte directo |
 
 **Todos los clientes, y el receptor detecta al moroso.** El acreedor no decide quién es moroso ni
 qué retirar: cada mes entrega a todos sus clientes con contrato, deban o no. Lo demás lo detecta
@@ -288,7 +323,7 @@ no deshace lo que el deudor ya acordó:
   corrige solo con la cartera siguiente.
 - **Una deuda pagada vuelve con cargos nuevos.** Si el deudor se atrasa otra vez en el mismo
   contrato, la deuda se reabre, siempre que todos sus cargos sean posteriores a los que se pagaron.
-  En DataBridge cuenta como una entrada nueva: exige de nuevo el mínimo de meses impagos.
+  En DataBridge cuenta como una entrada nueva: exige de nuevo los 30 días de mora.
 
 **La invitación.** Cuando una deuda entra —o vuelve— a cobranza en DataBridge, al deudor le llega
 solo su código de acceso por correo, sin monto ni enlace. La agencia lo puede reenviar desde su
@@ -435,6 +470,12 @@ POST /api/v1/suscripciones
 vez la reactiva y devuelve el mismo secreto, así que la llamada se puede repetir sin romper nada.
 APOFYX atiende el mismo `POST /api/v1/suscripciones` para sus clientes, con la clave que les emite.
 
+**El secreto se guarda cifrado en las dos puntas.** No puede ser una huella: quien envía firma con
+él y quien recibe verifica con él. Los tres sistemas lo guardan con AES-256-GCM, con una llave que
+no está en la base (`CIFRADO_LLAVE`), en el formato `enc:v1:` + base64(iv | etiqueta | cifrado).
+Lo mismo vale para la clave de API que el receptor presenta. Cambiar la llave obliga a volver a
+suscribirse.
+
 Al reenviar, APOFYX genera un evento nuevo (con su propio `id` y firmado con el secreto de
 Patrimonio) y cambia `lote_id_externo` por el lote original de Patrimonio. `deuda_id_externo` no
 cambia, porque siempre fue el de Patrimonio.
@@ -461,6 +502,7 @@ ahora en sentido contrario.
 | `pago.confirmado` | La pasarela confirma un pago | `deuda_id_externo`, `pago_id`, `monto`, `moneda`, `monto_clp`, `valor_uf`, `medio`, `pagado_en` |
 | `deuda.saldada` | El saldo llega a cero | `deuda_id_externo`, `saldada_en` |
 | `deuda.disputada` | El deudor dice que la deuda no es suya o no corresponde | `deuda_id_externo`, `motivo` |
+| `deuda.reanudada` | Revisada la disputa, la deuda sí corresponde y se vuelve a cobrar | `deuda_id_externo`, `motivo`, `con_convenio` |
 | `deuda.retirada` | Se procesó un retiro | `deuda_id_externo`, `motivo` |
 
 **`campana.avance` no nace de un lote**, así que su sobre no lleva `lote_id_externo`: la campaña
@@ -473,9 +515,33 @@ depende del proveedor de mensajería —`entregados`, `abiertos`, `respuestas`, 
 correcto es "no lo sé". `recuperado_clp` y `recuperado_uf` van separados: sumarlos no significaría
 nada.
 
-**Qué se emite hoy (22-09-2026).** Todo el catálogo salvo `deuda.disputada`, que espera el flujo de
-disputa del portal. Se puede pedir igual al suscribirse, para no tener que volver a registrarse
-cuando exista.
+**Qué se emite hoy (03-10-2026).** Todo el catálogo.
+
+**La disputa.** El deudor, desde el portal, dice que la deuda no corresponde y elige un motivo:
+
+| `motivo` | Qué dice el deudor |
+| --- | --- |
+| `no_reconoce` | No reconoce la deuda |
+| `ya_pagada` | Ya la pagó |
+| `monto_incorrecto` | El monto no corresponde |
+| `otro` | Otro motivo |
+
+Desde ese momento la deuda queda **disputada**: no se puede pagar ni repactar, y no le llegan
+recordatorios. El texto libre que escribe el deudor se queda en DataBridge: no viaja (I5). La
+empresa que cobra la revisa y la resuelve de una de dos formas:
+
+| Resolución | Evento | Qué pasa |
+| --- | --- | --- |
+| La deuda corresponde | `deuda.reanudada`, `motivo: "disputa_rechazada"` | Vuelve a cobranza, o a su convenio si tenía uno (`con_convenio: true`) |
+| La deuda no corresponde | `deuda.retirada`, `motivo: "disputa_resuelta"` | Sale de la cobranza y se anulan las cuotas pendientes |
+
+`deuda.reanudada` solo cambia una deuda que esté disputada: si llega tarde, después de un pago o un
+retiro, no reabre nada.
+
+**`pago.confirmado` dice con qué se pagó** en `medio`: `webpay`, `mercadopago` o `khipu`. Khipu
+cobra de verdad cuando DataBridge tiene la llave de una cuenta de cobro; Webpay y Mercado Pago son
+simuladas. Un pago de Khipu se confirma solo cuando Khipu dice que la transferencia está
+conciliada, con el monto y la transacción del cobro.
 
 **En UF, `pago.confirmado` trae el valor de la UF usado.** La UF cambia todos los días; el acreedor
 tiene que poder reconstruir por qué un pago de `UF 38,5` fueron esos pesos.
@@ -489,7 +555,7 @@ Cada receptor ya tiene la deuda y cruza por `deuda_id_externo`.
 
 | Uso | Con qué eventos |
 | --- | --- |
-| Poner al día el estado de cada deuda de su cartera | `repactacion.aceptada`, `pago.confirmado`, `deuda.saldada`, `deuda.disputada` |
+| Poner al día el estado de cada deuda de su cartera | `repactacion.aceptada`, `pago.confirmado`, `deuda.saldada`, `deuda.disputada`, `deuda.reanudada`, `deuda.retirada` |
 | Llenar `crm_campaignfunnelsnapshot`: envíos, ingresos al portal, pagos y recuperado | `campana.avance` |
 | Dejar el rastro de cada lote confirmado por DataBridge | `lote.procesado` |
 | Reportarle a Patrimonio | Todos, reenviados con el lote de Patrimonio |
@@ -498,8 +564,10 @@ Cada receptor ya tiene la deuda y cruza por `deuda_id_externo`.
 APOFYX porque no puede medirla (§11.3 de su documento): con DataBridge sí puede, y deja de
 enterarse de lo recuperado a fin de mes por una planilla.
 
-**Patrimonio** marca como pagados los cargos del contrato que corresponde. No sabe ni necesita
-saber que detrás de APOFYX está DataBridge.
+**Patrimonio** marca como pagados los cargos del contrato que corresponde, y muestra en el contrato
+en qué va una disputa: abierta (`deuda.disputada`), rechazada (`deuda.reanudada`) o aceptada
+(`deuda.retirada` con `disputa_resuelta`). No cambia ningún cargo por una disputa: revisar el
+contrato le toca a la corredora. No sabe ni necesita saber que detrás de APOFYX está DataBridge.
 
 ---
 
@@ -592,6 +660,8 @@ diseña en `TBridgeDB.sql` y reemplaza la ingesta CSV actual.
 | **I14** | ¿Un contrato por tramo o uno para toda la cadena? | **Uno para toda la cadena** (R8). Cada pieza se puede saltar o reemplazar |
 | **I10** | Fuente del valor de la UF | **Banco Central de Chile**, serie `F073.UFF.PRE.Z.D` de su Base de Datos Estadísticos (decidido el 22-09-2026). Se publica con un mes de adelanto, así que no hay hora del día que fijar: ms-payments carga cada mañana desde una semana atrás hasta 40 días adelante. Un cobro usa la UF de ese día exacto o no se hace. Sin credenciales, operaciones la carga a mano |
 | **I11** | ¿La integración de DataBridge es un microservicio propio o un módulo de ms-debt? | **Un paquete de ms-debt** (`integracion`). Todo lo que toca el contrato —lotes, deudas, mandatos, eventos— es de ms-debt, y un servicio aparte solo agregaría llamadas entre ambos |
+| **I15** | ¿Quién resuelve una disputa? | **La empresa que cobra**, desde su panel en DataBridge (decidido el 03-10-2026). La disputa recorre la cadena hasta el acreedor, que ve en qué va pero no la resuelve: la deuda la cobra la agencia (§8.2) |
+| **I16** | ¿Cómo se guardan los secretos que hay que leer de vuelta? | **Cifrados con AES-256-GCM** y una llave fuera de la base, en los tres sistemas (decidido el 03-10-2026). Las claves que solo se comparan siguen guardadas como huella (§8.1) |
 
 ### Abiertas
 

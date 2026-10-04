@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { resumenDeCartera } from "../api/analitica";
-import { enviarCodigo as pedirCodigo, listarDeudas, listarEnRiesgo } from "../api/deudas";
-import { dinero, ESTADO_DEUDA, fecha, rutLegible, totalDeLaDeuda } from "../utils/formato";
+import { enviarCodigo as pedirCodigo, listarDeudas, listarEnRiesgo, resolverDisputa } from "../api/deudas";
+import { dinero, ESTADO_DEUDA, fecha, MOTIVOS_DISPUTA, rutLegible, totalDeLaDeuda } from "../utils/formato";
 import { descargarCsv, montoParaExcel } from "../utils/exportar";
 import BarraEstado, { etapaDe } from "../components/BarraEstado";
 import { EstadoCartera, RecuperadoPorDia } from "../components/Graficos";
@@ -49,11 +49,30 @@ export default function DataBridge() {
     }
   }
 
+  /** Revisada la disputa: la deuda corresponde (reanudar) o no (retirar). */
+  async function resolver(deuda, resultado) {
+    const pregunta = resultado === "reanudar"
+      ? `¿La deuda de ${deuda.deudor} corresponde? Vuelve a cobranza. Puedes dejar una nota:`
+      : `¿La deuda de ${deuda.deudor} no corresponde? Sale de la cobranza y se le avisa al acreedor. Puedes dejar una nota:`;
+    const nota = window.prompt(pregunta, "");
+    if (nota === null) return;
+    setAvisos((a) => ({ ...a, [deuda.id]: { enviando: true } }));
+    try {
+      await resolverDisputa(deuda.id, resultado, nota.trim() || null);
+      setAvisos((a) => ({ ...a, [deuda.id]: { ok: resultado === "reanudar" ? "Cobro reanudado" : "Deuda retirada" } }));
+      await refrescar();
+      //  Ya no esta en revision: con ese filtro desapareceria, y no se veria en que quedo.
+      setFiltro("todas");
+    } catch (err) {
+      setAvisos((a) => ({ ...a, [deuda.id]: { error: err.message } }));
+    }
+  }
+
   const visibles = deudas.filter((d) => filtro === "todas" || d.estado === filtro);
 
   function exportar() {
     descargarCsv("cartera.csv",
-      ["Deudor", "RUT", "Acreedor", "Contrato", "Concepto", "Moneda", "Total", "Pagado", "Saldo", "Estado",
+      ["Deudor", "RUT", "Acreedor", "Referencia", "Concepto", "Moneda", "Total", "Pagado", "Saldo", "Estado",
         "Cuotas pagadas", "Cuotas del convenio", "Actualizada"],
       visibles.map((d) => [d.deudor, rutLegible(d.deudorRut), d.acreedor, d.externalId, d.concepto, d.moneda,
         montoParaExcel(totalDeLaDeuda(d), d.moneda), montoParaExcel(d.pagado, d.moneda),
@@ -67,7 +86,7 @@ export default function DataBridge() {
         <div>
           <span className="eyebrow">{resumen?.organizacion || "DataBridge"}</span>
           <h1>Cartera morosa</h1>
-          <p>Deudores con meses impagos, y en qué va cada uno: pendiente, en convenio o pago conciliado.</p>
+          <p>Deudores en mora, y en qué va cada uno: pendiente, en convenio o pago conciliado.</p>
         </div>
       </header>
       {error ? <div className="error">{error}</div> : null}
@@ -119,7 +138,7 @@ export default function DataBridge() {
         </div>
         <div className="card-cab">
           <div className="filters">
-            {["todas", "open", "repacted", "paid", "withdrawn"].map((f) => (
+            {["todas", "open", "repacted", "disputed", "paid", "withdrawn"].map((f) => (
               <button key={f} type="button" className={`chip ${filtro === f ? "on" : ""}`} onClick={() => setFiltro(f)}>
                 {f === "todas" ? "Todas" : ESTADO_DEUDA[f]}
               </button>
@@ -151,7 +170,7 @@ export default function DataBridge() {
                   return (
                     <tr key={d.id}>
                       <td>{d.deudor}<span className="sub">{rutLegible(d.deudorRut)}</span></td>
-                      <td>{d.acreedor}<span className="sub">{d.concepto}, contrato {d.externalId}</span></td>
+                      <td>{d.acreedor}<span className="sub">{d.concepto}, ref. {d.externalId}</span></td>
                       <td className="num">
                         {dinero(d.saldo, d.moneda)}
                         <span className="sub">de {dinero(totalDeLaDeuda(d), d.moneda)}</span>
@@ -159,8 +178,22 @@ export default function DataBridge() {
                       <td>
                         <BarraEstado deuda={d} compacta />
                         <span className="sub">{fecha(d.actualizada)}</span>
+                        {d.disputa ? (
+                          <span className="sub">
+                            <b>{MOTIVOS_DISPUTA[d.disputa.motivo] || d.disputa.motivo}</b>
+                            {d.disputa.detalle ? `: «${d.disputa.detalle}»` : ""}
+                          </span>
+                        ) : null}
                       </td>
                       <td>
+                        {d.estado === "disputed" ? (
+                          <div className="filters">
+                            <button type="button" className="btn btn-soft btn-sm" disabled={aviso?.enviando}
+                                    onClick={() => resolver(d, "reanudar")}>Reanudar cobro</button>
+                            <button type="button" className="btn btn-ghost btn-sm" disabled={aviso?.enviando}
+                                    onClick={() => resolver(d, "retirar")}>Retirar</button>
+                          </div>
+                        ) : null}
                         {cobrable ? (
                           <button type="button" className="btn btn-soft btn-sm" disabled={aviso?.enviando}
                                   onClick={() => enviarCodigo(d)}>

@@ -14,8 +14,8 @@ import java.time.Instant;
  * consulta de acreedor pasa por el.
  *
  * <p>`externalId` es el id que le puso el acreedor y viaja intacto por toda la
- * cadena: es lo que permite que un pago vuelva hasta el contrato de arriendo
- * que lo origino.
+ * cadena: es lo que permite que un pago vuelva hasta la obligacion que lo
+ * origino en el sistema del acreedor (un contrato, una matricula, un presupuesto).
  */
 @Entity
 @Table(name = "debts")
