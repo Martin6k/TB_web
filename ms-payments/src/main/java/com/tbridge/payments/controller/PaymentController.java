@@ -161,6 +161,34 @@ public class PaymentController {
                 .build();
     }
 
+    @RequestMapping(value = "/public/mercadopago/retorno", method = {RequestMethod.GET, RequestMethod.POST})
+    @Operation(summary = "La vuelta desde Mercado Pago",
+            description = "Mercado Pago devuelve aca al deudor tras pagar o cancelar. Responde con redireccion a la pagina del resultado.")
+    @ApiResponse(responseCode = "302", description = "A la pagina del resultado del pago")
+    public ResponseEntity<Void> retornoMercadoPago(
+            @RequestParam(name = "payment_id", required = false) String paymentId,
+            @RequestParam(name = "collection_id", required = false) String collectionId,
+            @RequestParam(name = "status", required = false) String status,
+            @RequestParam(name = "collection_status", required = false) String collectionStatus,
+            @RequestParam(name = "external_reference", required = false) String externalReference,
+            @RequestParam(name = "preference_id", required = false) String preferenceId) {
+        String pid = paymentId != null && !paymentId.isBlank() ? paymentId : collectionId;
+        return ResponseEntity.status(HttpStatus.FOUND)
+                .location(URI.create(payments.retornoMercadoPago(pid, status, collectionStatus, externalReference, preferenceId)))
+                .build();
+    }
+
+    @RequestMapping(value = "/public/mercadopago/aviso", method = {RequestMethod.GET, RequestMethod.POST})
+    @ResponseStatus(HttpStatus.OK)
+    @Operation(summary = "El aviso de Mercado Pago (Webhook)",
+            description = "Mercado Pago avisa que un pago cambio de estado.")
+    public void avisoDeMercadoPago(
+            @RequestParam(name = "topic", required = false) String topic,
+            @RequestParam(name = "id", required = false) String idParam,
+            @RequestBody(required = false) String cuerpo) {
+        payments.avisoMercadoPago(topic, idParam, cuerpo);
+    }
+
     @PostMapping("/public/{id}/verificar")
     @Operation(summary = "Preguntarle a Khipu en que va el pago",
             description = "Khipu devuelve al deudor a la pagina del resultado sin decir nada del pago: esa pagina "

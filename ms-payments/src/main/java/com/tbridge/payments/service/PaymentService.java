@@ -82,6 +82,7 @@ public class PaymentService {
     private final KhipuClient khipu;
     private final FirmaDeKhipu firmaDeKhipu;
     private final WebpayClient webpay;
+    private final com.tbridge.payments.client.MercadoPagoClient mercadopago;
     private final String publicUrl;
     private final String avisosDeKhipu;
     private final Duration venceEn;
@@ -96,6 +97,9 @@ public class PaymentService {
      */
     public static final String RETORNO_WEBPAY = "/api/payments/public/webpay/retorno";
 
+    /** Donde Mercado Pago devuelve al deudor despues de pagar o cancelar. */
+    public static final String RETORNO_MERCADOPAGO = "/api/payments/public/mercadopago/retorno";
+
     public PaymentService(
             PaymentRepository payments,
             PaymentEventRepository eventos,
@@ -106,6 +110,7 @@ public class PaymentService {
             KhipuClient khipu,
             FirmaDeKhipu firmaDeKhipu,
             WebpayClient webpay,
+            com.tbridge.payments.client.MercadoPagoClient mercadopago,
             @Value("${app.public-url}") String publicUrl,
             @Value("${app.khipu.url-avisos:}") String avisosDeKhipu,
             @Value("${app.khipu.vence-en:30m}") Duration venceEn
@@ -119,6 +124,7 @@ public class PaymentService {
         this.khipu = khipu;
         this.firmaDeKhipu = firmaDeKhipu;
         this.webpay = webpay;
+        this.mercadopago = mercadopago;
         this.publicUrl = publicUrl.replaceAll("/$", "");
         this.avisosDeKhipu = avisosDeKhipu == null || avisosDeKhipu.isBlank() ? null
                 : avisosDeKhipu.trim().replaceAll("/$", "");
@@ -190,6 +196,20 @@ public class PaymentService {
             payments.save(pago);
             return respuesta(pago).conEnlaceDePago(cobro.paymentUrl());
         }
+        if (cobraMercadoPago(pago)) {
+            //  El cobro se abre en Mercado Pago ahora (Checkout Pro).
+            String returnUrl = publicUrl + RETORNO_MERCADOPAGO;
+            com.tbridge.payments.client.MercadoPagoClient.Preferencia pref = mercadopago.crearPreferencia(
+                    String.valueOf(pago.getId()),
+                    "Pago de deuda N° " + pago.getDebtId(),
+                    pago.getAmountClp(),
+                    user != null ? user.email() : null,
+                    returnUrl
+            );
+            pago.setGatewayTxnId(pref.id());
+            payments.save(pago);
+            return respuesta(pago).conEnlaceDePago(pref.url(mercadopago.testMode()));
+        }
         return respuesta(pago).conEnlaceDePago(enlaceDePago(pago));
     }
 
@@ -205,13 +225,21 @@ public class PaymentService {
         return pago.getGateway() == Payment.Gateway.webpay && webpay.real();
     }
 
+    private boolean cobraMercadoPago(Payment pago) {
+        return pago.getGateway() == Payment.Gateway.mercadopago && mercadopago.real();
+    }
+
     /** Si este pago lo cobra una pasarela real y no la simulacion. */
     private boolean cobraDeVerdad(Payment pago) {
-        return cobraKhipu(pago) || cobraWebpay(pago);
+        return cobraKhipu(pago) || cobraWebpay(pago) || cobraMercadoPago(pago);
     }
 
     private static String nombre(Payment pago) {
-        return pago.getGateway() == Payment.Gateway.webpay ? "Webpay" : "Khipu";
+        return switch (pago.getGateway()) {
+            case webpay -> "Webpay";
+            case khipu -> "Khipu";
+            case mercadopago -> "Mercado Pago";
+        };
     }
 
     /**
@@ -516,6 +544,100 @@ public class PaymentService {
             }
         }
         return vencidos;
+    }
+
+    // ------------------------------------------------------------------
+    //  Mercado Pago
+    // ------------------------------------------------------------------
+
+    /**
+     * Donde vuelve el deudor desde Mercado Pago tras pagar o cancelar.
+     * Se consulta el pago si hay paymentId o se usa el estado que viene de vuelta.
+     */
+    @Transactional
+    public String retornoMercadoPago(String paymentId, String status, String collectionStatus,
+                                     String externalReference, String preferenceId) {
+        Payment pago = null;
+        if (externalReference != null && !externalReference.isBlank()) {
+            try {
+                pago = payments.findById(Long.parseLong(externalReference.trim())).orElse(null);
+            } catch (NumberFormatException ignored) {}
+        }
+        if (pago == null && preferenceId != null && !preferenceId.isBlank()) {
+            pago = payments.findByGatewayAndGatewayTxnId(Payment.Gateway.mercadopago, preferenceId.trim()).orElse(null);
+        }
+        if (pago == null && paymentId != null && !paymentId.isBlank() && !"null".equalsIgnoreCase(paymentId)) {
+            pago = payments.findByGatewayAndGatewayTxnId(Payment.Gateway.mercadopago, paymentId.trim()).orElse(null);
+        }
+        if (pago == null) {
+            throw new ApiException(HttpStatus.NOT_FOUND, "Mercado Pago devolvio un pago que no existe");
+        }
+
+        String actualStatus = (status != null && !status.isBlank() && !"null".equalsIgnoreCase(status))
+                ? status.trim()
+                : (collectionStatus != null && !collectionStatus.isBlank() && !"null".equalsIgnoreCase(collectionStatus))
+                ? collectionStatus.trim()
+                : null;
+
+        if (pago.getStatus() == Payment.Status.created) {
+            if (paymentId != null && !paymentId.isBlank() && !"null".equalsIgnoreCase(paymentId)) {
+                try {
+                    com.tbridge.payments.client.MercadoPagoClient.PagoInfo info = mercadopago.consultarPago(paymentId.trim());
+                    String crudo = info.crudo() != null ? info.crudo().toString() : null;
+                    if (info.pagado()) {
+                        confirmar(pago, PaymentEvent.Source.webhook, paymentId.trim(), null, crudo);
+                    } else if ("rejected".equalsIgnoreCase(info.status()) || "cancelled".equalsIgnoreCase(info.status())) {
+                        fallido(pago, crudo);
+                    }
+                } catch (Exception e) {
+                    if ("approved".equalsIgnoreCase(actualStatus)) {
+                        confirmar(pago, PaymentEvent.Source.portal, paymentId.trim(), null, null);
+                    } else if (actualStatus != null) {
+                        fallido(pago, null);
+                    }
+                }
+            } else if ("approved".equalsIgnoreCase(actualStatus)) {
+                confirmar(pago, PaymentEvent.Source.portal, preferenceId, null, null);
+            } else if ("rejected".equalsIgnoreCase(actualStatus) || "cancelled".equalsIgnoreCase(actualStatus)) {
+                fallido(pago, null);
+            }
+        }
+
+        return enlaceDePago(pago);
+    }
+
+    /**
+     * Procesa avisos asíncronos (Webhooks / IPN) de Mercado Pago.
+     */
+    @Transactional
+    public void avisoMercadoPago(String topic, String idParam, String cuerpo) {
+        String paymentId = idParam;
+        if ((paymentId == null || paymentId.isBlank()) && cuerpo != null) {
+            try {
+                com.fasterxml.jackson.databind.JsonNode nodo = JSON.readTree(cuerpo);
+                if (nodo.hasNonNull("data") && nodo.get("data").hasNonNull("id")) {
+                    paymentId = nodo.get("data").get("id").asText();
+                } else if (nodo.hasNonNull("id")) {
+                    paymentId = nodo.get("id").asText();
+                }
+            } catch (Exception ignored) {}
+        }
+        if (paymentId != null && !paymentId.isBlank()) {
+            try {
+                com.tbridge.payments.client.MercadoPagoClient.PagoInfo info = mercadopago.consultarPago(paymentId.trim());
+                if (info.externalReference() != null) {
+                    Payment pago = payments.findById(Long.parseLong(info.externalReference().trim())).orElse(null);
+                    if (pago != null && pago.getStatus() == Payment.Status.created) {
+                        String crudo = info.crudo() != null ? info.crudo().toString() : null;
+                        if (info.pagado()) {
+                            confirmar(pago, PaymentEvent.Source.webhook, paymentId.trim(), null, crudo);
+                        } else if ("rejected".equalsIgnoreCase(info.status()) || "cancelled".equalsIgnoreCase(info.status())) {
+                            fallido(pago, crudo);
+                        }
+                    }
+                }
+            } catch (Exception ignored) {}
+        }
     }
 
     private Payment porToken(String token) {

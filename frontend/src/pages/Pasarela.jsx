@@ -44,6 +44,7 @@ export default function Pasarela() {
   // Khipu puede tardar unos segundos en conciliar la transferencia.
   const verificando = pago && !pago.simulada && pago.status === "created" && pago.gateway === "khipu";
   const enWebpay = pago && !pago.simulada && pago.status === "created" && pago.gateway === "webpay";
+  const enMercadoPago = pago && !pago.simulada && pago.status === "created" && pago.gateway === "mercadopago";
   useEffect(() => {
     if (!verificando || intentos >= INTENTOS) return;
     const t = setTimeout(async () => {
@@ -101,6 +102,14 @@ export default function Pasarela() {
             <p className="hint">
               Este pago se hace en la página de Webpay. Si no te llevó, o la cerraste antes de terminar, cierra esta
               ventana y ábrelo otra vez desde el portal.
+            </p>
+          </div>
+        ) : enMercadoPago ? (
+          <div style={{ padding: "16px 0 4px" }}>
+            <h2>Se paga en Mercado Pago</h2>
+            <p className="hint">
+              Este pago se realiza en la pasarela de Mercado Pago. Si no te llevó, o cerraste la ventana antes de terminar,
+              cierra esta ventana y ábrelo otra vez desde el portal.
             </p>
           </div>
         ) : verificando ? (

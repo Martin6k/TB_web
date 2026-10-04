@@ -25,7 +25,9 @@ import java.time.Instant;
 import java.util.List;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -241,5 +243,29 @@ class PaymentControllerTest {
                         .contentType(MediaType.APPLICATION_JSON).content("{\"payment_id\":\"x\"}"))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.error").value("Firma de Khipu invalida"));
+    }
+
+    @Test
+    void la_vuelta_de_mercadopago_redirige_al_resultado() throws Exception {
+        when(payments.retornoMercadoPago("12345", "approved", null, "41", "pref_1"))
+                .thenReturn("http://localhost:8080/pasarela/41?sig=x");
+
+        mvc.perform(get("/api/payments/public/mercadopago/retorno")
+                        .param("payment_id", "12345")
+                        .param("status", "approved")
+                        .param("external_reference", "41")
+                        .param("preference_id", "pref_1"))
+                .andExpect(status().isFound())
+                .andExpect(header().string("Location", "http://localhost:8080/pasarela/41?sig=x"));
+    }
+
+    @Test
+    void el_aviso_de_mercadopago_se_procesa_sin_sesion() throws Exception {
+        mvc.perform(post("/api/payments/public/mercadopago/aviso")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"action\":\"payment.created\",\"data\":{\"id\":\"12345\"}}"))
+                .andExpect(status().isOk());
+
+        verify(payments).avisoMercadoPago(isNull(), isNull(), anyString());
     }
 }
