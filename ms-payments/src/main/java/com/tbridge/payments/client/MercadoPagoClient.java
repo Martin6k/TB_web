@@ -17,15 +17,29 @@ import org.springframework.web.client.RestClientException;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * Cliente REST para la API de Mercado Pago (Checkout Pro y Pagos v1).
  *
  * <pre>
- *   POST /checkout/preferences    crea la preferencia de cobro -> {id, init_point, sandbox_init_point}
- *   GET  /v1/payments/{id}        obtiene el estado del pago    -> {status, status_detail, amount, ...}
+ *   POST /checkout/preferences          crea la preferencia de cobro  -> {id, init_point, sandbox_init_point}
+ *   GET  /checkout/preferences/{id}     lee la preferencia           -> {payments: [{id, status}], ...}
+ *   GET  /v1/payments/{id}              obtiene el estado del pago   -> {status, status_detail, amount, ...}
  *   Authorization: Bearer <TOKEN> credencial de la aplicacion
  * </pre>
+ *
+ * <p>Dos cosas que hace distinto Mercado Pago y hay que respetar:</p>
+ * <ul>
+ *   <li><b>Las back_urls de http:// se descartan.</b> Mercado Pago las borra
+ *       sin avisar si no son https, y si se pidio {@code auto_return} la
+ *       preferencia entera se rechaza con {@code 400 invalid_auto_return}
+ *       ("auto_return invalid. back_url.success must be defined"). Por eso
+ *       {@code auto_return} solo se manda cuando la vuelta es https.</li>
+ *   <li><b>La preferencia es la que sabe del pago.</b> Con el id de la
+ *       preferencia se puede consultar que pagos se hicieron sobre ella, sin
+ *       depender de que el deudor vuelva al portal ni de que el aviso llegue.</li>
+ * </ul>
  */
 @Component
 public class MercadoPagoClient {
@@ -50,6 +64,31 @@ public class MercadoPagoClient {
         public boolean pagado() {
             return "approved".equalsIgnoreCase(status);
         }
+    }
+
+    /**
+     * Un pago hecho sobre una preferencia, tal como lo reporta Mercado Pago.
+     * {@code id} y {@code status} vienen null si todavia no se pago nada.
+     */
+    public record PagoDePreferencia(Long id, String status, JsonNode crudo) {
+        public boolean pagado() {
+            return id != null && "approved".equalsIgnoreCase(status);
+        }
+    }
+
+    /** Lo que se sabe de la preferencia mas adelante, para conciliar el pago. */
+    public record EstadoPreferencia(String id, String externalReference, Long totalAmount,
+                                    PagoDePreferencia pago) {}
+
+    /**
+     * Si Mercado Pago se va a quedar con esta direccion de vuelta.
+     *
+     * <p>Las back_urls que no son https las descarta en silencio (las deja
+     * vacias), asi que en local, con {@code http://localhost:5173}, la vuelta
+     * no existe para Mercado Pago aunque DataBridge la sirva bien.</p>
+     */
+    static boolean vueltaQueMercadoPagoAcepta(String url) {
+        return url != null && url.trim().toLowerCase(Locale.ROOT).startsWith("https://");
     }
 
     private final RestClient rest;
@@ -90,6 +129,10 @@ public class MercadoPagoClient {
 
     /**
      * Crea una preferencia de pago en Mercado Pago Checkout Pro.
+     *
+     * @param returnUrl donde vuelve el deudor. Si no es https, Mercado Pago la
+     *                  descarta y el deudor no vuelve solo: el pago se concilia
+     *                  contra la preferencia ({@link #consultarPreferencia}).
      */
     public Preferencia crearPreferencia(String externalReference, String titulo, long montoClp,
                                        String emailPayer, String returnUrl) {
@@ -100,11 +143,21 @@ public class MercadoPagoClient {
             Payer payer = new Payer(emailPayer != null && !emailPayer.isBlank() ? emailPayer : "test_user_660778198@testuser.com");
             BackUrls backUrls = new BackUrls(returnUrl, returnUrl, returnUrl);
 
+            //  auto_return solo si la vuelta es https: Mercado Pago valida la
+            //  back_url.success DESPUES de borrar las que no son https, y si la
+            //  encontro vacia rechaza la preferencia entera con 400.
+            boolean vuelveSiMismo = vueltaQueMercadoPagoAcepta(returnUrl);
+            if (!vuelveSiMismo) {
+                log.warn("La vuelta de Mercado Pago (PUBLIC_URL) no es https: Mercado Pago la va a descartar, "
+                        + "el deudor no volvera solo y no se pedira auto_return. El pago se concilia por la "
+                        + "preferencia. PUBLIC_URL=https://... lo arregla.");
+            }
+
             CrearPreferencia payload = new CrearPreferencia(
                     List.of(item),
                     payer,
                     backUrls,
-                    "approved",
+                    vuelveSiMismo ? "approved" : null,
                     externalReference,
                     "TECHNICAL BRIDGE"
             );
@@ -124,6 +177,11 @@ public class MercadoPagoClient {
             String initPoint = r.hasNonNull("init_point") ? r.get("init_point").asText() : null;
             String sandboxInitPoint = r.hasNonNull("sandbox_init_point") ? r.get("sandbox_init_point").asText() : null;
 
+            if (vuelveSiMismo && r.path("back_urls").path("success").asText("").isBlank()) {
+                log.warn("Mercado Pago creo la preferencia {} sin back_urls.success: el deudor no va a "
+                        + "volver solo. Revisa que PUBLIC_URL sea una direccion https.", id);
+            }
+
             log.info("Preferencia Mercado Pago creada con éxito: id={}, initPoint={}", id, initPoint);
             return new Preferencia(id, initPoint, sandboxInitPoint);
         } catch (HttpClientErrorException e) {
@@ -134,6 +192,59 @@ public class MercadoPagoClient {
             log.error("No fue posible conectar con Mercado Pago", e);
             throw new ApiException(HttpStatus.BAD_GATEWAY,
                     "Mercado Pago no responde en este momento. Prueba de nuevo o con otro medio.");
+        }
+    }
+
+    /**
+     * Lee la preferencia para saber si ya se le pago y con que id.
+     *
+     * <p>Es la forma de conciliar un pago de Mercado Pago sin depender de la
+     * vuelta del deudor ni del aviso: en local Mercado Pago no puede devolverse
+     * a un {@code http://localhost} ni avisar a la maquina del desarrollador.</p>
+     *
+     * @return el estado de la preferencia, o null si ya no existe en Mercado Pago.
+     */
+    public EstadoPreferencia consultarPreferencia(String preferenceId) {
+        try {
+            JsonNode r = rest.get()
+                    .uri(PREFERENCIAS + "/{id}", preferenceId)
+                    .retrieve()
+                    .body(JsonNode.class);
+
+            if (r == null || !r.hasNonNull("id")) {
+                return null;
+            }
+
+            String id = r.get("id").asText();
+            String extRef = r.hasNonNull("external_reference") ? r.get("external_reference").asText() : null;
+            Long total = r.hasNonNull("total_amount") ? r.get("total_amount").asLong() : null;
+
+            //  payments[] viene vacio mientras nadie haya pagado la preferencia.
+            PagoDePreferencia pago = null;
+            JsonNode pagos = r.get("payments");
+            if (pagos != null && pagos.isArray() && !pagos.isEmpty()) {
+                JsonNode primero = pagos.get(0);
+                if (primero != null && primero.hasNonNull("id")) {
+                    pago = new PagoDePreferencia(primero.get("id").asLong(),
+                            primero.hasNonNull("status") ? primero.get("status").asText() : null,
+                            primero);
+                }
+            }
+
+            log.info("Preferencia Mercado Pago {} leida: extRef={}, total={}, pago={}",
+                    id, extRef, total, pago != null ? pago.id() + "/" + pago.status() : "ninguno");
+            return new EstadoPreferencia(id, extRef, total, pago);
+        } catch (HttpClientErrorException e) {
+            if (e.getStatusCode().value() == 404) {
+                log.warn("La preferencia {} no existe en Mercado Pago", preferenceId);
+                return null;
+            }
+            log.error("Mercado Pago no pudo leer la preferencia {} ({}): {}",
+                    preferenceId, e.getStatusCode(), e.getResponseBodyAsString());
+            throw new ApiException(HttpStatus.BAD_GATEWAY, "No se pudo consultar la preferencia en Mercado Pago");
+        } catch (RestClientException e) {
+            log.error("Error al consultar la preferencia {} en Mercado Pago: {}", preferenceId, e.getMessage());
+            throw new ApiException(HttpStatus.BAD_GATEWAY, "No se pudo consultar la preferencia en Mercado Pago");
         }
     }
 

@@ -20,8 +20,8 @@ tecnológica, y se demuestra con APOFYX y tres acreedores ficticios de rubros di
   configurar nada;
 - **Khipu**, cuando DataBridge tiene la llave de una cuenta de cobro: el deudor paga con una
   transferencia, y con una cuenta en modo desarrollador lo hace contra un banco ficticio.
-
-Mercado Pago es una simulación.
+- **Mercado Pago**, con Checkout Pro y las credenciales de prueba de la aplicación: el deudor
+  paga con tarjeta en la página de Mercado Pago.
 
 **Todo el sistema se levanta con una orden** y queda en http://localhost:8080. Solo hace falta
 Docker; no hay que instalar JDK, Node ni Python:
@@ -142,7 +142,7 @@ solo, a las 11 de la noche si quiere. El acreedor se entera sin que nadie escrib
 | **Base de datos** | **MySQL 8.4**, una base por servicio | El mismo motor que usa APOFYX |
 | **Migraciones** | Flyway, con `ddl-auto: validate` | El esquema se versiona; Hibernate no lo cambia a espaldas de nadie |
 | **Mensajería** | RabbitMQ 3.13 | Lleva el aviso de pago entre servicios |
-| **Pagos** | Webpay Plus, API REST v1.2 de Transbank · Khipu, API de pagos v3 | Cobro real con tarjeta y por transferencia. Mercado Pago, simulado |
+| **Pagos** | Webpay Plus, API REST v1.2 de Transbank · Khipu, API de pagos v3 · Mercado Pago, Checkout Pro | Cobro real con tarjeta y por transferencia. Sin credenciales, simuladas |
 | **Autenticación** | JWT (JJWT) · códigos de un solo uso | Sin contraseñas |
 | **Cifrado** | AES-256-GCM, de la JCA | Los secretos que hay que leer de vuelta se guardan cifrados |
 | **Contenedores** | Docker · Docker Compose | Nueve contenedores, una orden |
@@ -380,7 +380,7 @@ flowchart TD
 | **gateway** | La única puerta: CORS, límite de peticiones con Bucket4j y enrutamiento. Al retorno de Webpay le quita el `Origin`, porque es la página de Transbank la que devuelve al navegador con un formulario; CORS no se abre a nadie más |
 | **ms-auth** | Código de acceso (RUT + 6 caracteres, un solo uso, 24 h) y enlace de respaldo por correo, que es también como entra el personal de las empresas. Emite el JWT, maneja las sesiones y manda los correos, incluido el recordatorio de cuota |
 | **ms-debt** | Deudas, cargos y cuotas; convenios de 3 a 24 cuotas sin interés; reclamos y su resolución; ingesta de la cartera v1 por API o CSV; eventos de vuelta a quien entregó la cartera; resumen para el panel; certificado y comprobantes en PDF; recordatorio de las cuotas por vencer; claves de API de cada empresa |
-| **ms-payments** | Los cobros. Webpay contra Transbank y Khipu (si tiene llave) de verdad; Mercado Pago simulado. El monto lo decide ms-debt, nunca el navegador. En UF fija los pesos al abrir el cobro. Un cobro abandonado se vence: a los 15 minutos en Webpay, a los 30 en Khipu |
+| **ms-payments** | Los cobros. Webpay contra Transbank, Mercado Pago con Checkout Pro y Khipu (si tiene llave) de verdad; sin credenciales, simulados. El monto lo decide ms-debt, nunca el navegador. En UF fija los pesos al abrir el cobro. Un cobro abandonado se vence: a los 15 minutos en Webpay, a los 30 en Khipu |
 | **ms-ai** | Asistente de solo lectura (Python/FastAPI). Lee las deudas con la sesión del deudor, sin acceso propio a la base, y detecta frustración o desconfianza para ajustar el tono. Usa un LLM si hay `XAI_API_KEY`; si no, reglas |
 | **MySQL 8.4** | Una base por servicio, con el esquema versionado en Flyway ([`db/README.md`](db/README.md)) |
 | **RabbitMQ** | Lleva el aviso de pago de ms-payments a ms-debt. Si está apagado, el mismo aviso va por HTTP; en los dos casos sale de una bandeja con reintentos, así que no se pierde |
@@ -910,10 +910,12 @@ $cuerpo | docker compose exec -T ms-payments curl -s -X POST http://127.0.0.1:80
 
 **Lo que no está:**
 
-- **Mercado Pago es simulada.** Integrarla es el mismo trabajo que Webpay y Khipu: un cliente, un
-  retorno y su confirmación.
 - **Khipu real falta probarlo con una cuenta de verdad** en modo desarrollador
   ([cómo](#para-pagar-con-khipu-de-verdad)).
+- **Mercado Pago:** funciona contra la API real con credenciales de prueba, pero en local no se
+  pudo cerrar el cobro de punta a punta en un navegador, porque Mercado Pago descarta las
+  direcciones de vuelta que no son https. Con un túnel https la vuelta automática funciona; sin
+  él, el pago se concilia preguntándole a Mercado Pago por la preferencia.
 - **WhatsApp:** el contrato admite el canal, pero los códigos salen solo por correo.
 - **Varias réplicas:** ver *Escalabilidad* en [§9](#9-requisitos-no-funcionales).
 - **Retención de datos** (decisión I12 del contrato): cuánto se guarda una deuda saldada antes de

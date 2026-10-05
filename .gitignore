@@ -17,5 +17,8 @@ api_transbank.md
 Conexion_MS.md
 todolisto.md
 
+# Credenciales de prueba de las pasarelas: son secretos, van solo en el .env.
+credenciales.md
+
 # Notas locales de commit: no se versionan.
 COMMIT.txt

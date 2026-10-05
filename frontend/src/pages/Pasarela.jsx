@@ -18,6 +18,9 @@ import { CheckAnimado, IconoCandado } from "../components/Iconos";
  * - Khipu lo devuelve sin decir nada: esta pagina le pide a ms-payments que le
  *   pregunte a Khipu, y repite mientras Khipu verifica la transferencia. Si
  *   volvio por "cancelar", el pago queda fallido, salvo que alcanzo a pagar.
+ * - Mercado Pago tampoco avisa al volver, y en local ni siquiera puede volver
+ *   (descarta las back_urls http), asi que esta pagina le pregunta a
+ *   ms-payments y este le pregunta a Mercado Pago por la preferencia.
  */
 const CADA_MS = 4000;
 const INTENTOS = 45;
@@ -41,22 +44,28 @@ export default function Pasarela() {
       .catch((err) => setError(err.status === 401 ? "Enlace de pago inválido" : err.message));
   }, [id, sig, cancelado]);
 
-  // Khipu puede tardar unos segundos en conciliar la transferencia.
-  const verificando = pago && !pago.simulada && pago.status === "created" && pago.gateway === "khipu";
+  // Khipu puede tardar unos segundos en conciliar la transferencia, y en
+  // Mercado Pago hay que preguntar si el deudor pago en su pagina: Mercado Pago
+  // descarta las back_urls que no son https, asi que en local no puede
+  // devolvernos al portal ni avisarnos, y el pago se concilia contra la
+  // preferencia.
+  const esperandoPago =
+    pago && !pago.simulada && pago.status === "created" && ["khipu", "mercadopago"].includes(pago.gateway);
+  const verificando = esperandoPago && pago.gateway === "khipu";
   const enWebpay = pago && !pago.simulada && pago.status === "created" && pago.gateway === "webpay";
   const enMercadoPago = pago && !pago.simulada && pago.status === "created" && pago.gateway === "mercadopago";
   useEffect(() => {
-    if (!verificando || intentos >= INTENTOS) return;
+    if (!esperandoPago || intentos >= INTENTOS) return;
     const t = setTimeout(async () => {
       try {
         setPago(await verificarPagoPublico(id, sig));
       } catch {
-        /* Khipu no respondio: se reintenta */
+        /* La pasarela no respondio: se reintenta */
       }
       setIntentos((n) => n + 1);
     }, CADA_MS);
     return () => clearTimeout(t);
-  }, [verificando, intentos, id, sig]);
+  }, [esperandoPago, intentos, id, sig]);
 
   async function confirmar() {
     setBusy(true);

@@ -209,6 +209,15 @@ services:
       KHIPU_LLAVE: ${KHIPU_LLAVE:-}
       KHIPU_URL_AVISOS: ${KHIPU_URL_AVISOS:-}
       KHIPU_SECRETO: ${KHIPU_SECRETO:-}
+      #  Con access token, Mercado Pago (Checkout Pro) cobra de verdad. Sin
+      #  token, queda simulada. El deudor vuelve de Mercado Pago a PUBLIC_URL,
+      #  que viene en el bloque comun: Mercado Pago descarta las direcciones de
+      #  vuelta que no son https, asi que en local no vuelve solo y el pago se
+      #  concilia contra la preferencia.
+      MERCADOPAGO_URL: ${MERCADOPAGO_URL:-https://api.mercadopago.com}
+      MERCADOPAGO_ACCESS_TOKEN: ${MERCADOPAGO_ACCESS_TOKEN:-}
+      MERCADOPAGO_PUBLIC_KEY: ${MERCADOPAGO_PUBLIC_KEY:-}
+      MERCADOPAGO_ENVIRONMENT: ${MERCADOPAGO_ENVIRONMENT:-TEST}
     healthcheck:
       test: ["CMD-SHELL", "curl -fs http://127.0.0.1:8084/actuator/health || exit 1"]
       interval: 10s

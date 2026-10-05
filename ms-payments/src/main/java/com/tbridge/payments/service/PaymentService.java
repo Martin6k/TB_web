@@ -6,6 +6,7 @@ import com.tbridge.payments.client.DebtClient;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.tbridge.payments.client.KhipuClient;
+import com.tbridge.payments.client.MercadoPagoClient;
 import com.tbridge.payments.client.WebpayClient;
 import com.tbridge.payments.dto.request.CheckoutRequest;
 import com.tbridge.payments.dto.gateway.WebpayCommitResponse;
@@ -21,6 +22,8 @@ import com.tbridge.payments.model.UfValue;
 import com.tbridge.payments.repository.DebtNotificationRepository;
 import com.tbridge.payments.repository.PaymentEventRepository;
 import com.tbridge.payments.repository.PaymentRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
@@ -52,7 +55,7 @@ import java.util.regex.Pattern;
  *       misma transaccion y sale despues, con reintentos.</li>
  * </ol>
  *
- * <p>Dos pasarelas cobran de verdad, y en las dos el pago se da por hecho solo
+ * <p>Tres pasarelas cobran de verdad, y en las tres el pago se da por hecho solo
  * cuando la pasarela lo confirma, de servidor a servidor:
  *
  * <ul>
@@ -61,10 +64,14 @@ import java.util.regex.Pattern;
  *       transaccion al volver.</li>
  *   <li><b>Khipu</b>, cuando hay {@code KHIPU_LLAVE}: el deudor paga con una
  *       transferencia, y se le pregunta a Khipu si esta conciliado.</li>
+ *   <li><b>Mercado Pago</b>, cuando hay {@code MERCADOPAGO_ACCESS_TOKEN}: el
+ *       deudor paga en Checkout Pro. No se espera su vuelta: se le pregunta a
+ *       Mercado Pago por la preference abierta, que es lo que guarda que pagos
+ *       se hicieron sobre ella.</li>
  * </ul>
  *
- * <p>Mercado Pago es simulada: una pagina propia confirma con la firma del
- * enlace.
+ * <p>Sin credenciales, las tres quedan simuladas: una pagina propia confirma
+ * con la firma del enlace.
  */
 @Service
 public class PaymentService {
@@ -72,6 +79,7 @@ public class PaymentService {
     private static final ZoneId CHILE = ZoneId.of("America/Santiago");
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final Pattern ORDEN = Pattern.compile("^ORD(\\d{1,18})(T\\d+)?$");
+    private static final Logger log = LoggerFactory.getLogger(PaymentService.class);
 
     private final PaymentRepository payments;
     private final PaymentEventRepository eventos;
@@ -82,7 +90,7 @@ public class PaymentService {
     private final KhipuClient khipu;
     private final FirmaDeKhipu firmaDeKhipu;
     private final WebpayClient webpay;
-    private final com.tbridge.payments.client.MercadoPagoClient mercadopago;
+    private final MercadoPagoClient mercadopago;
     private final String publicUrl;
     private final String avisosDeKhipu;
     private final Duration venceEn;
@@ -110,7 +118,7 @@ public class PaymentService {
             KhipuClient khipu,
             FirmaDeKhipu firmaDeKhipu,
             WebpayClient webpay,
-            com.tbridge.payments.client.MercadoPagoClient mercadopago,
+            MercadoPagoClient mercadopago,
             @Value("${app.public-url}") String publicUrl,
             @Value("${app.khipu.url-avisos:}") String avisosDeKhipu,
             @Value("${app.khipu.vence-en:30m}") Duration venceEn
@@ -199,7 +207,7 @@ public class PaymentService {
         if (cobraMercadoPago(pago)) {
             //  El cobro se abre en Mercado Pago ahora (Checkout Pro).
             String returnUrl = publicUrl + RETORNO_MERCADOPAGO;
-            com.tbridge.payments.client.MercadoPagoClient.Preferencia pref = mercadopago.crearPreferencia(
+            MercadoPagoClient.Preferencia pref = mercadopago.crearPreferencia(
                     String.valueOf(pago.getId()),
                     "Pago de deuda N° " + pago.getDebtId(),
                     pago.getAmountClp(),
@@ -337,15 +345,19 @@ public class PaymentService {
     // ------------------------------------------------------------------
 
     /**
-     * Le pregunta a Khipu en que va el pago. Lo llama la pagina del resultado,
-     * a la que Khipu devuelve al deudor: Khipu no dice nada al devolverlo, asi
-     * que hay que preguntar. Un pago simulado o ya cerrado se devuelve tal cual.
+     * Le pregunta a la pasarela en que va el pago. Lo llama la pagina del
+     * resultado, a la que la pasarela devuelve al deudor: ni Khipu ni Mercado
+     * Pago dicen nada al devolverlo, asi que hay que preguntar. Un pago
+     * simulado o ya cerrado se devuelve tal cual.
      */
     @Transactional
     public PaymentResponse verificar(Long id, String sig) {
         Payment pago = conFirmaValida(id, sig);
         if (cobraKhipu(pago)) {
             conciliar(pago);
+        }
+        if (cobraMercadoPago(pago)) {
+            conciliarMercadoPago(pago);
         }
         return respuesta(pago);
     }
@@ -551,6 +563,55 @@ public class PaymentService {
     // ------------------------------------------------------------------
 
     /**
+     * Pregunta a Mercado Pago si el cobro de esta preferencia ya se pago.
+     *
+     * <p>Hace falta porque en local Mercado Pago no puede devolverse a un
+     * {@code http://localhost} (descarta las back_urls que no son https) ni
+     * avisar a la maquina del desarrollador. La preferencia es lo que guarda que
+     * pagos se hicieron sobre ella, asi que se pregunta ahi y no se espera a que
+     * el deudor vuelva.</p>
+     *
+     * <p>El estado no se toma de la respuesta: se usa el id del pago para
+     * preguntarle a {@code /v1/payments}, que es la fuente que tambien usa el
+     * aviso. Asi un pago de otra preferencia no puede cerrar este pago.</p>
+     */
+    private void conciliarMercadoPago(Payment pago) {
+        if (pago.getStatus() != Payment.Status.created) {
+            return;
+        }
+        //  Al abrirse el cobro se guardo el id de la preferencia; ya confirmado
+        //  queda el id del pago, y entonces no hay nada que conciliar.
+        String referencia = pago.getGatewayTxnId();
+        if (referencia == null || referencia.isBlank()) {
+            return;
+        }
+        try {
+            MercadoPagoClient.EstadoPreferencia pref = mercadopago.consultarPreferencia(referencia.trim());
+            if (pref == null || pref.pago() == null || pref.pago().id() == null) {
+                return; //  Todavia no se ha pagado nada sobre esta preferencia.
+            }
+            MercadoPagoClient.PagoInfo info = mercadopago.consultarPago(String.valueOf(pref.pago().id()));
+            String crudo = info.crudo() != null ? info.crudo().toString() : null;
+            boolean esElMismo = String.valueOf(pago.getId()).equals(String.valueOf(info.externalReference()).trim())
+                    && info.transactionAmount() != null
+                    && info.transactionAmount().compareTo(BigDecimal.valueOf(pago.getAmountClp())) == 0;
+            if (info.pagado() && esElMismo) {
+                confirmar(pago, PaymentEvent.Source.webhook, String.valueOf(info.id()), null, crudo);
+            } else if (info.pagado()) {
+                //  Pagado, pero no es el cobro que se abrio: no se acepta.
+                log.warn("Mercado Pago pago {} del pago {} no calza con la preferencia abierta", info.id(), pago.getId());
+                fallido(pago, crudo);
+            } else if ("rejected".equalsIgnoreCase(info.status()) || "cancelled".equalsIgnoreCase(info.status())) {
+                fallido(pago, crudo);
+            }
+        } catch (ApiException e) {
+            //  Mercado Pago no respondio: se deja el pago abierto y se reintenta
+            //  en la proxima consulta de la pagina del resultado.
+            log.warn("No se pudo conciliar el pago {} con Mercado Pago: {}", pago.getId(), e.getMessage());
+        }
+    }
+
+    /**
      * Donde vuelve el deudor desde Mercado Pago tras pagar o cancelar.
      * Se consulta el pago si hay paymentId o se usa el estado que viene de vuelta.
      */
@@ -582,7 +643,7 @@ public class PaymentService {
         if (pago.getStatus() == Payment.Status.created) {
             if (paymentId != null && !paymentId.isBlank() && !"null".equalsIgnoreCase(paymentId)) {
                 try {
-                    com.tbridge.payments.client.MercadoPagoClient.PagoInfo info = mercadopago.consultarPago(paymentId.trim());
+                    MercadoPagoClient.PagoInfo info = mercadopago.consultarPago(paymentId.trim());
                     String crudo = info.crudo() != null ? info.crudo().toString() : null;
                     if (info.pagado()) {
                         confirmar(pago, PaymentEvent.Source.webhook, paymentId.trim(), null, crudo);
@@ -624,7 +685,7 @@ public class PaymentService {
         }
         if (paymentId != null && !paymentId.isBlank()) {
             try {
-                com.tbridge.payments.client.MercadoPagoClient.PagoInfo info = mercadopago.consultarPago(paymentId.trim());
+                MercadoPagoClient.PagoInfo info = mercadopago.consultarPago(paymentId.trim());
                 if (info.externalReference() != null) {
                     Payment pago = payments.findById(Long.parseLong(info.externalReference().trim())).orElse(null);
                     if (pago != null && pago.getStatus() == Payment.Status.created) {
