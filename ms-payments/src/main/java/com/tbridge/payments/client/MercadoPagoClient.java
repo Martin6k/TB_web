@@ -51,10 +51,9 @@ public class MercadoPagoClient {
     /** La preferencia de pago generada en Mercado Pago. */
     public record Preferencia(String id, String initPoint, String sandboxInitPoint) {
         public String url(boolean testMode) {
-            if (testMode && sandboxInitPoint != null && !sandboxInitPoint.isBlank()) {
-                return sandboxInitPoint;
-            }
-            return initPoint != null ? initPoint : sandboxInitPoint;
+            // Mercado Pago unificó el checkout en init_point; el subdominio sandbox está discontinuado
+            // y muestra "Algo anda mal". Las credenciales de prueba activan el modo test automáticamente.
+            return initPoint != null && !initPoint.isBlank() ? initPoint : sandboxInitPoint;
         }
     }
 

@@ -75,8 +75,8 @@ npm run dev
 Ejecuta este comando en PowerShell para obtener un código de acceso para Felipe Rojas (deuda pendiente disponible):
 
 ```powershell
-$cuerpo = @{ rut = "16482337-7"; canales = @("correo"); correo = "felipe.rojas@correo.cl"; acreedor = "Patrimonio Inmuebles"; paraQue = "CTR-2025-014" } | ConvertTo-Json -Compress
-$cuerpo | docker compose exec -T ms-auth curl -s -X POST http://127.0.0.1:8081/internal/codigos -H "X-Internal-Key: tbridge-internal-dev" -H "Content-Type: application/json" --data-binary "@-"
+$cuerpo = @{ rut = "14583206-3"; canales = @("correo"); correo = "rodrigo.perez@correo.cl"; acreedor = "Patrimonio Inmuebles"; paraQue = "CTR-2025-019" } | ConvertTo-Json -Compress
+ $cuerpo | docker compose exec -T ms-auth curl -s -X POST http://127.0.0.1:8081/internal/codigos -H "X-Internal-Key: tbridge-internal-dev" -H "Content-Type: application/json" --data-binary "@-"
 ```
 
 O revisa el código de 6 dígitos en el buzón local de Mailpit:

@@ -102,12 +102,19 @@ export default function Pay() {
   async function pagar() {
     setBusy(true);
     setError("");
+    // Se abre la ventana de inmediato en el evento del usuario para que el navegador no la bloquee
+    const popup = window.open("", "_blank", "noopener,width=480,height=720");
     try {
       const cuotas = enConvenio ? elegidas.map((c) => c.id) : null;
       const data = await abrirCobro(Number(id), cuotas, pasarela);
       setPago(data);
-      window.open(data.checkoutUrl, "_blank", "noopener,width=480,height=720");
+      if (popup) {
+        popup.location.href = data.checkoutUrl;
+      } else {
+        window.location.href = data.checkoutUrl;
+      }
     } catch (err) {
+      if (popup) popup.close();
       setError(err.message);
     } finally {
       setBusy(false);
